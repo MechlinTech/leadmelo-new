@@ -1,0 +1,108 @@
+x-app: &app
+  image: leadmelo:${RELEASE_TAG:-20.0.0}
+  build: .
+  environment:
+    DATABASE_URL: postgresql://leadmelo_app:${APP_DB_PASSWORD:?set hex APP_DB_PASSWORD}@postgres:5432/${POSTGRES_DB:-leadmelo}
+    APP_URL: ${APP_URL:?set APP_URL}
+    SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+    DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?set DATA_ENCRYPTION_KEY}
+    PROVIDER_GATEWAY_URL: ${PROVIDER_GATEWAY_URL:-}
+    OUTBOUND_ENABLED: ${OUTBOUND_ENABLED:-false}
+    PLAN_ENFORCEMENT: ${PLAN_ENFORCEMENT:-off}
+    SENDER_HEALTH_AUTO: ${SENDER_HEALTH_AUTO:-on}
+    AI_ALLOWED_HOSTS: ${AI_ALLOWED_HOSTS:-}
+    AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-200}
+    ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+    ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
+  networks: [backend]
+  init: true
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "5"}
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-leadmelo}
+      POSTGRES_USER: leadmelo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set hex POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leadmelo"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt: [no-new-privileges:true]
+  migrate:
+    <<: *app
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://leadmelo:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-leadmelo}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-leadmelo}
+    command: ["sh", "-c", "npm run db:deploy && node --import tsx scripts/database-role.ts"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  web:
+    <<: *app
+    restart: unless-stopped
+    ports: ["127.0.0.1:${HOST_PORT:-7676}:3000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  worker:
+    <<: *app
+    restart: unless-stopped
+    command: ["npm", "run", "worker"]
+    stop_grace_period: 45s
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "node", "--import", "tsx", "scripts/worker-health.ts"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  # Optional Apollo/Hunter provider gateway. Start with: docker compose --profile gateway up -d
+  # It deliberately receives NO database credentials, session secret or DATA_ENCRYPTION_KEY: only its own
+  # config directory (tenant bindings and vendor keys, mode 600) and a small state volume.
+  gateway:
+    image: leadmelo:${RELEASE_TAG:-20.0.0}
+    profiles: ["gateway"]
+    restart: unless-stopped
+    command: ["npm", "run", "gateway"]
+    environment:
+      GATEWAY_HOST: 0.0.0.0
+      PORT: "8788"
+      GATEWAY_TENANTS_FILE: /etc/leadmelo-gateway/tenants.json
+      GATEWAY_TAXONOMY_FILE: /etc/leadmelo-gateway/taxonomy.json
+      GATEWAY_STORE_FILE: /var/lib/leadmelo-gateway/store.jsonl
+    ports: ["127.0.0.1:8788:8788"]
+    volumes:
+      - ${GATEWAY_CONFIG_DIR:-./gateway-config}:/etc/leadmelo-gateway:ro
+      - gatewaydata:/var/lib/leadmelo-gateway
+    networks: [backend]
+    init: true
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+networks:
+  backend:
+    driver: bridge
+volumes:
+  pgdata:
+  gatewaydata:

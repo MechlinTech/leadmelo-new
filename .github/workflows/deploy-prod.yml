@@ -1,0 +1,67 @@
+name: deploy-production
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, leadmelo-prod]
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write environment file
+        shell: powershell
+        env:
+          APP_URL: "${{ vars.APP_URL }}"
+          HOST_PORT: "${{ vars.HOST_PORT }}"
+          COMPOSE_PROJECT_NAME: "${{ vars.COMPOSE_PROJECT_NAME }}"
+          POSTGRES_DB: "${{ vars.POSTGRES_DB }}"
+          RELEASE_TAG: "${{ github.sha }}"
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          APP_DB_PASSWORD: ${{ secrets.APP_DB_PASSWORD }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
+          PROVIDER_GATEWAY_URL: ${{ secrets.PROVIDER_GATEWAY_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_SECRET: ${{ secrets.ALERT_WEBHOOK_SECRET }}
+        run: |
+          if (-not $env:APP_URL) { $env:APP_URL = 'http://localhost:7677' }
+          if (-not $env:HOST_PORT) { $env:HOST_PORT = '7677' }
+          if (-not $env:COMPOSE_PROJECT_NAME) { $env:COMPOSE_PROJECT_NAME = 'leadmelo-prod' }
+          if (-not $env:POSTGRES_DB) { $env:POSTGRES_DB = 'leadmelo_prod' }
+          if (-not $env:POSTGRES_PASSWORD -or -not $env:APP_DB_PASSWORD -or -not $env:SESSION_SECRET -or -not $env:DATA_ENCRYPTION_KEY) {
+            throw 'Set POSTGRES_PASSWORD, APP_DB_PASSWORD, SESSION_SECRET and DATA_ENCRYPTION_KEY on the production GitHub Environment'
+          }
+          @"
+          NODE_ENV=production
+          APP_URL=$($env:APP_URL)
+          HOST_PORT=$($env:HOST_PORT)
+          COMPOSE_PROJECT_NAME=$($env:COMPOSE_PROJECT_NAME)
+          RELEASE_TAG=$($env:RELEASE_TAG)
+          POSTGRES_PASSWORD=$($env:POSTGRES_PASSWORD)
+          APP_DB_PASSWORD=$($env:APP_DB_PASSWORD)
+          POSTGRES_DB=$($env:POSTGRES_DB)
+          DATABASE_URL=postgresql://leadmelo_app:$($env:APP_DB_PASSWORD)@postgres:5432/$($env:POSTGRES_DB)
+          SESSION_SECRET=$($env:SESSION_SECRET)
+          DATA_ENCRYPTION_KEY=$($env:DATA_ENCRYPTION_KEY)
+          PROVIDER_GATEWAY_URL=$($env:PROVIDER_GATEWAY_URL)
+          GATEWAY_CONFIG_DIR=./gateway-config
+          OUTBOUND_ENABLED=false
+          ALERT_WEBHOOK_URL=$($env:ALERT_WEBHOOK_URL)
+          ALERT_WEBHOOK_SECRET=$($env:ALERT_WEBHOOK_SECRET)
+          PLAN_ENFORCEMENT=off
+          SENDER_HEALTH_AUTO=on
+          "@ | Set-Content -Encoding ascii .env.prod
+      - name: Deploy Docker stack
+        shell: powershell
+        run: ./scripts/deploy.ps1 -Environment production

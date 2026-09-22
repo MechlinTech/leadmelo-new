@@ -1,0 +1,172 @@
+{
+  "report": [
+    {
+      "page": "desktop-01-landing",
+      "violations": []
+    },
+    {
+      "page": "desktop-02-pricing-monthly",
+      "violations": []
+    },
+    {
+      "page": "desktop-04-request-access",
+      "violations": []
+    },
+    {
+      "page": "desktop-05-signin",
+      "violations": []
+    },
+    {
+      "page": "desktop-06-assistant-plans-answer",
+      "violations": []
+    },
+    {
+      "page": "desktop-07-assistant-handoff",
+      "violations": []
+    },
+    {
+      "page": "mobile-01-landing",
+      "violations": []
+    },
+    {
+      "page": "mobile-02-pricing-monthly",
+      "violations": []
+    },
+    {
+      "page": "mobile-04-request-access",
+      "violations": []
+    },
+    {
+      "page": "mobile-05-signin",
+      "violations": []
+    },
+    {
+      "page": "mobile-06-assistant-plans-answer",
+      "violations": []
+    },
+    {
+      "page": "mobile-07-assistant-handoff",
+      "violations": []
+    },
+    {
+      "page": "theme-dark-pricing",
+      "violations": []
+    },
+    {
+      "page": "theme-ocean-pricing",
+      "violations": []
+    },
+    {
+      "page": "theme-forest-pricing",
+      "violations": []
+    },
+    {
+      "page": "theme-sunset-pricing",
+      "violations": []
+    },
+    {
+      "page": "desktop-10-app-dashboard",
+      "violations": []
+    },
+    {
+      "page": "desktop-11-app-icp",
+      "violations": []
+    },
+    {
+      "page": "desktop-12-app-campaigns",
+      "violations": []
+    },
+    {
+      "page": "desktop-13-app-autopilot",
+      "violations": []
+    },
+    {
+      "page": "desktop-14-app-crm",
+      "violations": []
+    },
+    {
+      "page": "desktop-15-app-experiments",
+      "violations": []
+    },
+    {
+      "page": "desktop-16-app-settings",
+      "violations": []
+    },
+    {
+      "page": "theme-ocean-app-settings",
+      "violations": []
+    },
+    {
+      "page": "theme-persists-after-reload",
+      "theme": "ocean"
+    },
+    {
+      "page": "admin-blocked-from-operator",
+      "url": "http://localhost:3000/app"
+    },
+    {
+      "page": "mobile-10-app-dashboard",
+      "violations": []
+    },
+    {
+      "page": "mobile-11-app-icp",
+      "violations": []
+    },
+    {
+      "page": "mobile-12-app-campaigns",
+      "violations": []
+    },
+    {
+      "page": "mobile-13-app-autopilot",
+      "violations": []
+    },
+    {
+      "page": "mobile-14-app-crm",
+      "violations": []
+    },
+    {
+      "page": "mobile-15-app-experiments",
+      "violations": []
+    },
+    {
+      "page": "mobile-16-app-settings",
+      "violations": []
+    },
+    {
+      "page": "desktop-17-ai-settings",
+      "violations": []
+    },
+    {
+      "page": "desktop-18-ai-campaign-draft",
+      "violations": []
+    },
+    {
+      "page": "desktop-19-ai-reply-insight",
+      "violations": []
+    },
+    {
+      "page": "ai-flow",
+      "ok": true,
+      "filled": [
+        "subject0",
+        "body2",
+        "titles"
+      ]
+    },
+    {
+      "page": "desktop-30-operator",
+      "violations": []
+    },
+    {
+      "page": "pwa",
+      "reg": {
+        "registered": true,
+        "scope": "http://localhost:3000/",
+        "active": true
+      },
+      "manifestName": "LeadMelo",
+      "icons": 4
+    }
+  ],
+  "consoleErrors": []
+}

@@ -1,0 +1,47 @@
+name: security-and-test
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: leadmelo_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic-ci-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:synthetic-ci-password@localhost:5432/leadmelo_test
+      TEST_DATABASE_CONFIRM: isolated
+      NEXT_TELEMETRY_DISABLED: 1
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: synthetic-ci-password
+      PGDATABASE: leadmelo_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run db:validate
+      - run: npm run db:generate
+      - run: npm run db:deploy
+      - run: npm run db:deploy
+      - run: npm test
+      - run: npm run test:integration
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run test:http
+      - run: npm audit --audit-level=high
+      - run: python3 scripts/handoff_audit.py
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16 age
+      - run: bash scripts/ci-restore.sh

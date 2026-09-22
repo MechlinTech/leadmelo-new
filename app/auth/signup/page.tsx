@@ -1,0 +1,1 @@
+export default function Page() { return <main id="main" className="wrap"><h1>Workspace access</h1><p>Contact your LeadMelo administrator to provision a workspace.</p><a href="/auth/signin">Sign in</a></main>; }

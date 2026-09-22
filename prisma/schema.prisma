@@ -1,0 +1,833 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  TENANT_ADMIN
+  MANAGER
+  MEMBER
+}
+
+enum Plan {
+  FREE
+  STARTER
+  GROWTH
+  SCALE
+  ENTERPRISE
+}
+
+enum LeadStatus {
+  NEW
+  QUALIFIED
+  CONTACTED
+  REPLIED
+  MEETING
+  WON
+  LOST
+  SUPPRESSED
+}
+
+enum ProviderKind {
+  APOLLO
+  HUNTER
+  ROCKETREACH
+  CLAY
+  PEOPLE_DATA_LABS
+  CUSTOM
+}
+
+enum DiscoveryJobStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETE
+  FAILED
+}
+
+enum ContactRole {
+  CTO
+  VP_ENGINEERING
+  ENGINEERING_MANAGER
+  QA_DIRECTOR
+  QA_MANAGER
+  HEAD_OF_QUALITY
+  OTHER
+}
+
+enum ContactVerificationStatus {
+  UNKNOWN
+  VALID
+  RISKY
+  INVALID
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETE
+}
+
+enum SequenceStepType {
+  EMAIL
+  LINKEDIN_TASK
+  CALL_TASK
+}
+
+enum OutreachStatus {
+  QUEUED
+  SENDING
+  CANCELED
+  SENT
+  OPENED
+  CLICKED
+  REPLIED
+  BOUNCED
+  UNSUBSCRIBED
+  FAILED
+}
+
+enum OutreachPurpose {
+  SEQUENCE
+  BOOKING_INVITATION
+}
+
+enum ReplyIntent {
+  POSITIVE
+  NEUTRAL
+  OBJECTION
+  NEGATIVE
+  OUT_OF_OFFICE
+  UNSURE
+}
+
+enum Channel {
+  EMAIL
+  LINKEDIN
+  PHONE
+  WEB_FORM
+}
+
+enum AppointmentStatus {
+  REQUESTED
+  BOOKED
+  COMPLETED
+  NO_SHOW
+  CANCELED
+  DISQUALIFIED
+  WON
+  LOST
+}
+
+enum DeliverabilityStatus {
+  HEALTHY
+  WATCHLIST
+  THROTTLED
+  BLOCKED
+}
+
+enum CampaignOutcomeType {
+  APPOINTMENT_BOOKED
+  QUALIFIED_OPPORTUNITY
+  DISQUALIFIED
+  NO_SHOW
+  WON
+  LOST
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+  CANCELED
+}
+
+enum AutomationMode {
+  FULLY_AUTOMATIC
+  REVIEW_BEFORE_SEND
+  REVIEW_BEFORE_BOOKING
+  PAUSED
+}
+
+enum QualificationStatus {
+  UNCHECKED
+  QUALIFIED
+  NEEDS_REVIEW
+  DISQUALIFIED
+}
+
+model Tenant {
+  id             String                  @id @default(cuid())
+  name           String
+  slug           String                  @unique
+  plan           Plan                    @default(FREE)
+  createdAt      DateTime                @default(now())
+  users          User[]
+  leads          Lead[]
+  invites        Invite[]
+  settings       TenantSetting?
+  providers      DataProvider[]
+  discoveryJobs  DiscoveryJob[]
+  campaigns      Campaign[]
+  contacts       Contact[]
+  outreachEvents OutreachEvent[]
+  replies        Reply[]
+  icps           ICP[]
+  appointments   Appointment[]
+  deliverability DeliverabilityProfile[]
+  automationRuns AutomationRun[]
+  usageLedger    UsageLedger[]
+}
+
+model User {
+  id           String    @id @default(cuid())
+  tenantId     String?
+  email        String    @unique
+  name         String?
+  role         Role      @default(MEMBER)
+  passwordHash String?
+  disabled     Boolean   @default(false)
+  totpSecret   String?
+  theme        String?
+  mfaEnabledAt DateTime?
+  totpLastStep Int?
+  recoveryHashes String[] @default([])
+  resets       PasswordReset[]
+  sessions     Session[]
+  createdAt    DateTime  @default(now())
+  tenant       Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model Invite {
+  id         String    @id @default(cuid())
+  tenantId   String
+  email      String
+  role       Role
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model Lead {
+  id                     String              @id @default(cuid())
+  tenantId               String
+  company                String
+  domain                 String?
+  contactName            String?
+  contactEmail           String?
+  score                  Int                 @default(0)
+  qualification          QualificationStatus @default(UNCHECKED)
+  status                 LeadStatus          @default(NEW)
+  reason                 String?
+  source                 String?
+  signalSummary          String?
+  disqualificationReason String?
+  calendlyUrl            String?
+  createdAt              DateTime            @default(now())
+  tenant                 Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contacts               Contact[]
+  outreachEvents         OutreachEvent[]
+
+  @@unique([tenantId, domain])
+  @@index([tenantId, status])
+  @@index([tenantId, score])
+  @@index([tenantId, qualification])
+}
+
+model Contact {
+  id                     String                    @id @default(cuid())
+  tenantId               String
+  leadId                 String?
+  fullName               String
+  title                  String?
+  role                   ContactRole               @default(OTHER)
+  email                  String?
+  linkedinUrl            String?
+  verification           ContactVerificationStatus @default(UNKNOWN)
+  sourceProvider         ProviderKind?
+  lastVerifiedAt         DateTime?
+  reverifyRequestedAt    DateTime?
+  verificationAttempts   Int                       @default(0)
+  verificationNextAt     DateTime                  @default(now())
+  verificationLeaseUntil DateTime?
+  createdAt              DateTime                  @default(now())
+  tenant                 Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead                   Lead?                     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  outreachEvents         OutreachEvent[]
+  replies                Reply[]
+  appointments           Appointment[]
+  enrollments            Enrollment[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, role])
+  @@index([tenantId, email])
+}
+
+model DataProvider {
+  id              String       @id @default(cuid())
+  tenantId        String
+  kind            ProviderKind
+  name            String
+  enabled         Boolean      @default(false)
+  encryptedConfig String?
+  priority        Int          @default(100)
+  createdAt       DateTime     @default(now())
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, kind, name])
+}
+
+model ICP {
+  id                    String         @id @default(cuid())
+  tenantId              String
+  name                  String
+  offer                 String
+  industries            String[]
+  companySizes          String[]
+  geographies           String[]
+  technologies          String[]
+  buyingSignals         String[]
+  buyerTitles           String[]
+  exclusionRules        String[]       @default([])
+  scoreWeights          Json           @default("{}")
+  minScore              Int            @default(75)
+  weeklyAppointmentGoal Int            @default(5)
+  active                Boolean        @default(true)
+  createdAt             DateTime       @default(now())
+  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  discoveryJobs         DiscoveryJob[]
+  campaigns             Campaign[]
+
+  @@index([tenantId, active])
+}
+
+model DiscoveryJob {
+  id                  String             @id @default(cuid())
+  tenantId            String
+  icpId               String?
+  name                String
+  status              DiscoveryJobStatus @default(DRAFT)
+  offer               String
+  targetTitles        String[]
+  industries          String[]
+  locations           String[]
+  keywords            String[]
+  excludedDomains     String[]           @default([])
+  weeklyProspectLimit Int                @default(50)
+  minScore            Int                @default(70)
+  calendlyUrl         String?
+  lastRunAt           DateTime?
+  nextRunAt           DateTime?
+  createdAt           DateTime           @default(now())
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  icp                 ICP?               @relation(fields: [icpId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([tenantId, icpId])
+}
+
+model Campaign {
+  id                         String                @id @default(cuid())
+  tenantId                   String
+  icpId                      String?
+  name                       String
+  status                     CampaignStatus        @default(DRAFT)
+  automationMode             AutomationMode        @default(FULLY_AUTOMATIC)
+  offer                      String?
+  senderName                 String
+  senderEmail                String
+  calendlyUrl                String
+  dailySendCap               Int                   @default(25)
+  weeklyProspectCap          Int                   @default(50)
+  weeklyAppointmentGoal      Int                   @default(5)
+  minScore                   Int                   @default(75)
+  minAppointmentQualityScore Int                   @default(80)
+  businessDaysOnly           Boolean               @default(true)
+  stopOnReply                Boolean               @default(true)
+  channels                   Channel[]             @default([EMAIL])
+  timezone                   String                @default("America/Los_Angeles")
+  sendStartHour              Int                   @default(9)
+  sendEndHour                Int                   @default(17)
+  nextRunAt                  DateTime              @default(now())
+  outcomeType                CampaignOutcomeType   @default(APPOINTMENT_BOOKED)
+  enrollments                Enrollment[]
+  createdAt                  DateTime              @default(now())
+  tenant                     Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  icp                        ICP?                  @relation(fields: [icpId], references: [id], onDelete: SetNull)
+  sequenceSteps              SequenceStep[]
+  outreachEvents             OutreachEvent[]
+  appointments               Appointment[]
+  outcomes                   CampaignOutcome[]
+  routingRules               CalendarRoutingRule[]
+  automationRuns             AutomationRun[]
+  version                    Int                   @default(1)
+  holidays                   String[]              @default([])
+  versions                   CampaignVersion[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, icpId])
+  @@index([status, nextRunAt])
+}
+
+model SequenceStep {
+  id               String           @id @default(cuid())
+  campaignId       String
+  stepOrder        Int
+  type             SequenceStepType @default(EMAIL)
+  waitBusinessDays Int              @default(0)
+  subject          String?
+  body             String
+  campaign         Campaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, stepOrder])
+}
+
+model OutreachEvent {
+  id                String          @id @default(cuid())
+  tenantId          String
+  campaignId        String?
+  leadId            String?
+  contactId         String?
+  stepOrder         Int?
+  status            OutreachStatus  @default(QUEUED)
+  purpose           OutreachPurpose @default(SEQUENCE)
+  providerMessageId String?
+  scheduledAt       DateTime?
+  sentAt            DateTime?
+  error             String?
+  idempotencyKey    String          @unique @default(cuid())
+  approvedAt        DateTime?
+  attempts          Int             @default(0)
+  leaseUntil        DateTime?
+  leaseToken        String?
+  reservedAt        DateTime?
+  subject           String?
+  body              String?
+  createdAt         DateTime        @default(now())
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaign          Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  lead              Lead?           @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  contact           Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([tenantId, scheduledAt])
+}
+
+model Reply {
+  id                String      @id @default(cuid())
+  tenantId          String
+  contactId         String?
+  intent            ReplyIntent @default(UNSURE)
+  rawSnippet        String
+  recommendedAction String?
+  bookedAt          DateTime?
+  createdAt         DateTime    @default(now())
+  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact           Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, intent])
+}
+
+model Appointment {
+  id                 String            @id @default(cuid())
+  tenantId           String
+  campaignId         String?
+  contactId          String?
+  providerEventId    String?
+  providerUpdatedAt  DateTime?
+  qualified          Boolean           @default(false)
+  status             AppointmentStatus @default(REQUESTED)
+  calendlyEventUri   String?
+  scheduledStart     DateTime?
+  scheduledEnd       DateTime?
+  timezone           String?
+  qualificationNotes String?
+  qualityScore       Int?
+  outcomeReason      String?
+  createdAt          DateTime          @default(now())
+  tenant             Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaign           Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  contact            Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, providerEventId])
+  @@index([tenantId, status])
+  @@index([tenantId, scheduledStart])
+}
+
+model CampaignOutcome {
+  id          String              @id @default(cuid())
+  campaignId  String
+  type        CampaignOutcomeType
+  count       Int                 @default(0)
+  targetCount Int                 @default(0)
+  notes       String?
+  measuredAt  DateTime            @default(now())
+  campaign    Campaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, type])
+}
+
+model CalendarRoutingRule {
+  id          String   @id @default(cuid())
+  campaignId  String
+  name        String
+  calendlyUrl String
+  timezone    String   @default("America/Los_Angeles")
+  minScore    Int      @default(75)
+  ownerEmail  String?
+  active      Boolean  @default(true)
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, active])
+}
+
+model DeliverabilityProfile {
+  id                String               @id @default(cuid())
+  tenantId          String
+  senderEmail       String
+  domain            String
+  status            DeliverabilityStatus @default(HEALTHY)
+  dailyCap          Int                  @default(25)
+  bounceRate        Float                @default(0)
+  complaintRate     Float                @default(0)
+  positiveReplyRate Float                @default(0)
+  lastCheckedAt     DateTime?
+  spfStatus         String?
+  dkimStatus        String?
+  dmarcStatus       String?
+  authCheckedAt     DateTime?
+  healthSource      String               @default("external")
+  detail            Json?
+  createdAt         DateTime             @default(now())
+  tenant            Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, senderEmail])
+}
+
+model AutomationRun {
+  id                 String    @id @default(cuid())
+  tenantId           String
+  campaignId         String
+  status             RunStatus @default(QUEUED)
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  prospectsFound     Int       @default(0)
+  contactsVerified   Int       @default(0)
+  messagesQueued     Int       @default(0)
+  repliesClassified  Int       @default(0)
+  appointmentsBooked Int       @default(0)
+  errors             Json?
+  idempotencyKey     String    @unique @default(cuid())
+  attempts           Int       @default(0)
+  leaseUntil         DateTime?
+  leaseToken         String?
+  availableAt        DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaign           Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([campaignId, createdAt])
+}
+
+model TenantSetting {
+  id                 String  @id @default(cuid())
+  tenantId           String  @unique
+  emailProvider      String?
+  encryptedConfig    String?
+  dailySendCap       Int     @default(100)
+  weeklyProspectCap  Int     @default(50)
+  defaultCalendlyUrl String?
+  senderName         String?
+  senderEmail        String?
+  automationEnabled  Boolean @default(false)
+  postalAddress      String?
+  gatewayKey         String?
+  webhookSecret      String?
+  calendlySigningKey String?
+  monthlySpendCapCents Int?
+  providerCostCents  Int     @default(0)
+  suspended          Boolean @default(false)
+  messageRetentionDays Int?
+  calendlyToken      String?
+  calendlyOrganizationUri String?
+  calendlyReconciledAt DateTime?
+  aiEnabled          Boolean @default(false)
+  aiBaseUrl          String?
+  aiModel            String?
+  aiKey              String?
+  aiFeatures         String[] @default([])
+  tenant             Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model AuditEvent {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  actorUserId String?
+  action      String
+  entity      String?
+  entityId    String?
+  ipHash      String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+}
+
+model Suppression {
+  id        String   @id @default(cuid())
+  tenantId  String
+  email     String
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, email])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model RateLimit {
+  key       String   @id
+  count     Int      @default(0)
+  expiresAt DateTime
+}
+
+model Enrollment {
+  id            String    @id @default(cuid())
+  tenantId      String
+  campaignId    String
+  contactId     String
+  campaign      Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact       Contact   @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  score         Int
+  hasBuyer      Boolean
+  hasPainSignal Boolean
+  evidence      Json
+  stoppedAt     DateTime?
+  stopReason    String?
+  createdAt     DateTime  @default(now())
+
+  @@unique([campaignId, contactId])
+  @@index([tenantId, contactId, stoppedAt])
+}
+
+model WebhookEvent {
+  id              String   @id @default(cuid())
+  tenantId        String
+  providerEventId String
+  type            String
+  createdAt       DateTime @default(now())
+
+  @@unique([tenantId, providerEventId])
+}
+
+model WorkerHeartbeat {
+  id        String   @id
+  updatedAt DateTime @updatedAt
+}
+
+model M365Connection {
+  tenantId        String   @id
+  directoryId     String   @unique
+  clientId        String
+  encryptedSecret String
+  mailboxes       String[]
+  enabled         Boolean  @default(true)
+  connectedAt     DateTime @default(now())
+}
+
+model MailReceipt {
+  id                String   @id @default(cuid())
+  tenantId          String
+  key               String   @unique
+  requestHash       String
+  mailbox           String
+  status            String   @default("NEW")
+  draftId           String?
+  internetMessageId String?
+  conversationId    String?
+  sentConfirmedAt   DateTime?
+  error             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, mailbox, internetMessageId])
+}
+
+model MailCursor {
+  id            String    @id @default(cuid())
+  tenantId      String
+  mailbox       String
+  cursor        String?
+  leaseToken    String?
+  leaseUntil    DateTime?
+  nextPollAt    DateTime  @default(now())
+  lastSuccessAt DateTime?
+  error         String?
+
+  @@unique([tenantId, mailbox])
+}
+
+model OperationalAlert {
+  id             String    @id @default(cuid())
+  tenantId       String
+  key            String    @unique
+  code           String
+  entityId       String
+  createdAt      DateTime  @default(now())
+  deliveredAt    DateTime?
+  acknowledgedAt DateTime?
+  attempts       Int       @default(0)
+  nextAttemptAt  DateTime  @default(now())
+  leaseToken     String?
+  leaseUntil     DateTime?
+
+  @@index([tenantId, createdAt])
+}
+
+model CampaignVersion {
+  id          String   @id @default(cuid())
+  tenantId    String
+  campaignId  String
+  version     Int
+  snapshot    Json
+  reason      String
+  actorUserId String?
+  createdAt   DateTime @default(now())
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, version])
+  @@index([tenantId])
+}
+
+model UsageLedger {
+  id             String   @id @default(cuid())
+  tenantId       String
+  campaignId     String?
+  kind           String
+  quantity       Int
+  costCents      Int
+  idempotencyKey String
+  createdAt      DateTime @default(now())
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Experiment {
+  id            String   @id @default(cuid())
+  tenantId      String
+  campaignId    String
+  stepOrder     Int
+  name          String
+  status        String   @default("DRAFT")
+  primaryMetric String   @default("POSITIVE_REPLY")
+  minSample     Int      @default(100)
+  createdAt     DateTime @default(now())
+  startedAt     DateTime?
+  concludedAt   DateTime?
+  variants        ExperimentVariant[]
+  assignments     ExperimentAssignment[]
+  recommendations ExperimentRecommendation[]
+
+  @@index([tenantId, campaignId])
+}
+
+model ExperimentVariant {
+  id           String     @id @default(cuid())
+  tenantId     String
+  experimentId String
+  label        String
+  isControl    Boolean    @default(false)
+  subject      String?
+  body         String?
+  weight       Int        @default(1)
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  assignments  ExperimentAssignment[]
+
+  @@unique([experimentId, label])
+}
+
+model ExperimentAssignment {
+  id           String     @id @default(cuid())
+  tenantId     String
+  experimentId String
+  variantId    String
+  enrollmentId String
+  createdAt    DateTime   @default(now())
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  variant      ExperimentVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([experimentId, enrollmentId])
+  @@index([variantId])
+}
+
+model ExperimentRecommendation {
+  id           String     @id @default(cuid())
+  tenantId     String
+  experimentId String
+  variantId    String
+  status       String     @default("OPEN")
+  verdict      Json
+  decidedBy    String?
+  decidedAt    DateTime?
+  createdAt    DateTime   @default(now())
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+
+  @@unique([experimentId, variantId])
+}
+
+model AccessRequest {
+  id        String    @id @default(cuid())
+  name      String
+  email     String
+  company   String?
+  message   String?
+  plan      String?
+  source    String
+  handledAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
+model AssistantQuestion {
+  id        String   @id @default(cuid())
+  question  String
+  audience  String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

@@ -1,0 +1,7 @@
+[Unit]
+Description=LeadMelo external readiness check
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/leadmelo-monitor.env
+ExecStart=/opt/leadmelo-monitor/external-monitor.sh

@@ -1,0 +1,28 @@
+staging.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:7676
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+    # Configure centralized logs with query-string redaction before enabling access logs.
+}
+
+# Optional: the bundled provider gateway (docker compose --profile gateway up -d) listens on
+# 127.0.0.1:8788. LeadMelo requires an https PROVIDER_GATEWAY_URL, so terminate TLS here. Restrict
+# access to the LeadMelo host's egress address if you can (for example with a firewall rule).
+gateway.example.com {
+    request_body {
+        max_size 64KB
+    }
+    reverse_proxy 127.0.0.1:8788 {
+        # A discovery request may wait up to the gateway's own sync window (default 12 s) before answering.
+        transport http {
+            response_header_timeout 20s
+        }
+    }
+    header X-Content-Type-Options "nosniff"
+    # Request bodies carry ICP data and email addresses: keep access logging off or redacted.
+}
