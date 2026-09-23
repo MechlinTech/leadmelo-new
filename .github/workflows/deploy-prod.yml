@@ -22,7 +22,7 @@ jobs:
       - name: Write environment file
         shell: powershell
         env:
-          APP_URL: "${{ vars.APP_URL }}"
+          APP_URL: "${{ secrets.APP_URL || vars.APP_URL }}"
           HOST_PORT: "${{ vars.HOST_PORT }}"
           COMPOSE_PROJECT_NAME: "${{ vars.COMPOSE_PROJECT_NAME }}"
           POSTGRES_DB: "${{ vars.POSTGRES_DB }}"

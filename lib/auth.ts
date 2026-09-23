@@ -4,9 +4,19 @@ import { hashToken } from './security';
 import { HttpError } from './http';
 
 export const sessionCookie = 'leadmelo_session';
+const loopback = new Set(['localhost', '127.0.0.1', '::1']);
 export function assertOrigin(req: Request) {
-  const expected = new URL(process.env.APP_URL ?? 'http://localhost:7676').origin;
-  if (req.headers.get('origin') !== expected) throw new HttpError(403, 'origin_not_allowed');
+  const origin = req.headers.get('origin');
+  if (!origin) throw new HttpError(403, 'origin_not_allowed');
+  const expected = new URL(process.env.APP_URL ?? 'http://localhost:7676');
+  let actual: URL;
+  try { actual = new URL(origin); } catch { throw new HttpError(403, 'origin_not_allowed'); }
+  if (actual.origin === expected.origin) return;
+  const expectedPort = expected.port || (expected.protocol === 'https:' ? '443' : '80');
+  const actualPort = actual.port || (actual.protocol === 'https:' ? '443' : '80');
+  const sameLoopback = loopback.has(expected.hostname) && loopback.has(actual.hostname)
+    && actual.protocol === expected.protocol && actualPort === expectedPort;
+  if (!sameLoopback) throw new HttpError(403, 'origin_not_allowed');
 }
 export async function rateLimit(key: string, limit: number, minutes: number) {
   const bucket = Math.floor(Date.now() / (minutes * 60000));
