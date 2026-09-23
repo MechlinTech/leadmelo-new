@@ -1,8 +1,14 @@
 import './globals.css';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
 import { THEME_COOKIE, isThemeId } from '../lib/themes';
 import PwaRegister from '../components/PwaRegister';
+
+const THEME_CSS = (() => {
+  try { return readFileSync(join(process.cwd(), 'public/leadmelo.css'), 'utf8'); } catch { return ''; }
+})();
 
 export const dynamic = 'force-dynamic';
 export const viewport: Viewport = {
@@ -22,6 +28,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const theme = isThemeId(stored) ? stored : 'system';
   return <html lang="en" data-theme={theme}>
     <body>
+      <style dangerouslySetInnerHTML={{ __html: THEME_CSS }} />
       <link rel="stylesheet" href="/leadmelo.css" precedence="default" />
       <a className="skip" href="#main">Skip to content</a>{children}<PwaRegister />
     </body>

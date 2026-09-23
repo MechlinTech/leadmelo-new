@@ -49,6 +49,10 @@ services:
   web:
     <<: *app
     restart: unless-stopped
+    command: ["node", "scripts/serve-with-css.mjs"]
+    volumes:
+      - ./scripts/serve-with-css.mjs:/app/scripts/serve-with-css.mjs:ro
+      - ./public/leadmelo.css:/app/public/leadmelo.css:ro
     ports: ["127.0.0.1:${HOST_PORT:-7676}:3000"]
     depends_on:
       migrate: {condition: service_completed_successfully}
