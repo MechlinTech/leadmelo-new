@@ -5,6 +5,13 @@ import { useEffect } from 'react';
 // build files are not content-hashed, so caching them would serve stale code.
 export default function PwaRegister() {
   useEffect(() => {
+    if (!document.querySelector('link[data-leadmelo-css], link[href="/leadmelo.css"]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = '/leadmelo.css';
+      link.setAttribute('data-leadmelo-css', '1');
+      (document.head || document.documentElement).appendChild(link);
+    }
     if (!('serviceWorker' in navigator) || process.env.NODE_ENV !== 'production') return;
     const secure = location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname);
     if (!secure) return;

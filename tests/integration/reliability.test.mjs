@@ -28,6 +28,18 @@ test('Microsoft 365 and autonomous recovery database flows',async t=>{
   const other=await db.tenant.create({data:{name:'Other',slug:`other-${randomUUID()}`,users:{create:{email:`admin-${randomUUID()}@example.com`,role:'TENANT_ADMIN'}}},include:{users:true}});
   const cookie=`${sessionCookie}=${await createSession(tenant.users[0].id)}`, otherCookie=`${sessionCookie}=${await createSession(other.users[0].id)}`;
   const req=(path,method='GET',body,auth=cookie)=>new Request(`http://localhost:3000/api/${path}`,{method,headers:{origin:'http://localhost:3000',cookie:auth,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  // Worker jobs pick one due row globally. Earlier files in this suite leave cursors, sends and alerts
+  // that would be claimed first and make these assertions look at the wrong tenant.
+  const parkOthers = async () => {
+    const notUs = { tenantId: { not: tenant.id } };
+    const later = new Date('2099-01-01');
+    await db.mailCursor.updateMany({ where: notUs, data: { nextPollAt: later, lastSuccessAt: new Date(), leaseUntil: null } });
+    await db.outreachEvent.updateMany({ where: { ...notUs, status: 'QUEUED' }, data: { scheduledAt: later } });
+    await db.campaign.updateMany({ where: { ...notUs, status: 'ACTIVE' }, data: { status: 'PAUSED' } });
+    await db.contact.updateMany({ where: notUs, data: { reverifyRequestedAt: null, verificationNextAt: later } });
+    await db.operationalAlert.updateMany({ where: { ...notUs, deliveredAt: null, acknowledgedAt: null }, data: { nextAttemptAt: later } });
+  };
+  await parkOthers();
   let config;
   await t.test('admin setup stores encrypted secret, does not expose it, and isolates tenants',async()=>{
    const body={directoryId:randomUUID(),clientId:randomUUID(),clientSecret:'synthetic-secret-123456789',mailboxes:['sender@example.com'],mailboxScopeConfirmed:true};
