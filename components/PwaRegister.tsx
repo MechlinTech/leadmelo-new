@@ -10,7 +10,7 @@ export default function PwaRegister() {
       link.rel = 'stylesheet';
       link.href = '/leadmelo.css';
       link.setAttribute('data-leadmelo-css', '1');
-      document.head.appendChild(link);
+      (document.head || document.documentElement).appendChild(link);
     }
     if (!('serviceWorker' in navigator) || process.env.NODE_ENV !== 'production') return;
     const secure = location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname);

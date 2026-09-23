@@ -36,4 +36,4 @@ export function middleware(request: NextRequest) {
   response.headers.set('Cache-Control', 'no-store');
   return response;
 }
-export const config = { matcher: ['/((?!api|_next/static|_next/image|icons|leadmelo.css|manifest.webmanifest|sw.js).*)'] };
+export const config = { matcher: ['/((?!api|_next/static|_next/image|icons|leadmelo.css|leadmelo-boot.js|manifest.webmanifest|sw.js).*)'] };
