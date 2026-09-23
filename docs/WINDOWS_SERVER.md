@@ -7,7 +7,7 @@ This host can run **development** (from `main`) and **production** (from the `pr
 | development | `main` | `leadmelo-dev` | `leadmelo_dev` | http://localhost:7676 |
 | production | `production` | `leadmelo-prod` | `leadmelo_prod` | http://localhost:7677 |
 
-Production uses **7677** so both stacks can run on one Windows server. If each runner is on its own host, set `HOST_PORT=7676` and `APP_URL=http://localhost:7676` (or your HTTPS origin) on that environment.
+Production uses **7677** so both stacks can run on one Windows server. Public access is via Cloudflare Tunnel to localhost; set `APP_URL` to the HTTPS hostname (for example `https://leadmelo.mechlintech.com`), not `http://localhost`.
 
 ## 1. Host software
 
@@ -74,6 +74,22 @@ Required **environment secrets** (not repository secrets, so prod cannot reuse d
 Optional environment secrets: `PROVIDER_GATEWAY_URL`, `ALERT_WEBHOOK_URL`, `ALERT_WEBHOOK_SECRET`.
 
 Optional **environment variables**: `APP_URL`, `HOST_PORT`, `COMPOSE_PROJECT_NAME`, `POSTGRES_DB`.
+
+For Cloudflare in front of development, set `APP_URL=https://leadmelo.mechlintech.com` (no trailing slash). After changing it, redeploy so session cookies are `Secure` and origin checks match the browser.
+
+## 6. Cloudflare Tunnel (`leadmelo.mechlintech.com`)
+
+Keep PostgreSQL and Docker unpublished. Point Cloudflare at the loopback web port only.
+
+1. In Cloudflare Zero Trust: **Networks → Tunnels → Create a tunnel** (Windows installer or `cloudflared` service).
+2. Public hostname:
+   - Subdomain / domain: `leadmelo` on `mechlintech.com`
+   - Type: `HTTP`
+   - URL: `http://127.0.0.1:7676` for the development stack (use `7677` when this hostname should serve production)
+3. SSL/TLS mode for the zone can stay **Full**. The tunnel is HTTP only to localhost; browsers get HTTPS from Cloudflare.
+4. Do not orange-cloud a public A/AAAA to the Windows server if the app is bound to `127.0.0.1`. The tunnel CNAME is enough.
+
+If `leadmelo.mechlintech.com` is the real customer URL, attach the tunnel to **production** (`7677`) and use a second hostname (for example `leadmelo-dev.mechlintech.com` → `127.0.0.1:7676`) for development. One public hostname cannot safely serve both databases.
 
 Push to `main` deploys development. Push (or merge) to `production` deploys production. You can also run **Actions → deploy-development / deploy-production → Run workflow**.
 

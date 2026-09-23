@@ -3,6 +3,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci --no-fund
+ARG CACHEBUST=css
+RUN echo "cachebust=$CACHEBUST"
 COPY . .
 RUN npm run db:generate && npm run build
 FROM node:22-bookworm-slim AS runtime

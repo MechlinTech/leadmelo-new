@@ -1,7 +1,7 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
-import { THEME_COOKIE, isThemeId, themeCss } from '../lib/themes';
+import { THEME_COOKIE, isThemeId } from '../lib/themes';
 import PwaRegister from '../components/PwaRegister';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const stored = (await cookies()).get(THEME_COOKIE)?.value;
   const theme = isThemeId(stored) ? stored : 'system';
   return <html lang="en" data-theme={theme}>
-    <head><style dangerouslySetInnerHTML={{ __html: themeCss() }} /></head>
-    <body><a className="skip" href="#main">Skip to content</a>{children}<PwaRegister /></body>
+    <body>
+      <link rel="stylesheet" href="/leadmelo.css" precedence="default" />
+      <a className="skip" href="#main">Skip to content</a>{children}<PwaRegister />
+    </body>
   </html>;
 }
