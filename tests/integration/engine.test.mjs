@@ -43,6 +43,13 @@ const server = createServer(async (req, res) => {
 function request(path, method = 'GET', body, auth = cookie, origin = process.env.APP_URL) {
   return new Request(`${process.env.APP_URL}/api/${path}`, { method, headers: { cookie: auth, origin, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body) });
 }
+function sessionFrom(response) {
+  const all = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [response.headers.get('set-cookie') ?? ''];
+  const raw = all.find(c => c.startsWith(`${sessionCookie}=`));
+  const token = raw?.match(new RegExp(`^${sessionCookie}=([^;]+)`))?.[1];
+  if (!token) throw new Error('login did not set a session cookie');
+  return `${sessionCookie}=${token}`;
+}
 
 test('persisted multi-tenant campaign-to-booking flow', async t => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -53,8 +60,11 @@ test('persisted multi-tenant campaign-to-booking flow', async t => {
     cookie = `${sessionCookie}=${await createSession(tenant.users[0].id)}`;
 
     await t.test('real login, malformed JSON, authorization and CSRF', async () => {
+      const previous = cookie;
       const response = await login(request('auth/login', 'POST', { email: tenant.users[0].email, password: 'long-test-password-123' }, ''));
       assert.equal(response.status, 200); assert.match(response.headers.get('set-cookie'), /HttpOnly/);
+      cookie = sessionFrom(response);
+      assert.equal((await getICPs(request('icps', 'GET', undefined, previous))).status, 401, 'a new login replaces the previous session');
       assert.equal((await login(request('auth/login', 'POST', { email: tenant.users[0].email, password: 'wrong' }, ''))).status, 401);
       assert.equal((await getICPs(request('icps', 'GET', undefined, ''))).status, 401);
       assert.equal((await createICP(request('icps', 'POST', '{'))).status, 400);
