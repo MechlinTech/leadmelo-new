@@ -34,6 +34,13 @@ test('invitations, MFA and password reset', async t => {
   const params = id => ({ params: Promise.resolve({ id }) });
   const tokenOf = url => new URL(url).searchParams.get('token');
   const doLogin = (email, password, code) => login(req('auth/login', 'POST', { email, password, ...(code ? { code } : {}) }));
+  const sessionFrom = response => {
+    const all = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [response.headers.get('set-cookie') ?? ''];
+    const raw = all.find(c => c.startsWith(`${sessionCookie}=`));
+    const token = raw?.match(new RegExp(`^${sessionCookie}=([^;]+)`))?.[1];
+    if (!token) throw new Error('login did not set a session cookie');
+    return `${sessionCookie}=${token}`;
+  };
 
   await t.test('only tenant admins invite; roles are limited; existing users are never linked', async () => {
     const body = { email: `new-${randomUUID()}@example.com`, role: 'MEMBER' };
@@ -79,7 +86,9 @@ test('invitations, MFA and password reset', async t => {
     assert.match(setup.otpauthUri, /^otpauth:\/\/totp\//);
     const secret = base32Decode(setup.secret), S = totpStep();
     assert.notEqual((await db.user.findUnique({ where: { id: u.user.id } })).totpSecret, setup.secret, 'secret stored encrypted');
-    assert.equal((await doLogin(u.email, strong)).status, 200, 'MFA not yet active until confirmed');
+    const preMfa = await doLogin(u.email, strong);
+    assert.equal(preMfa.status, 200, 'MFA not yet active until confirmed');
+    u.cookie = sessionFrom(preMfa);
     assert.equal((await mfaEnable(req('auth/mfa/enable', 'POST', { code: '000000' }, u.cookie))).status, 400);
     const enabled = await mfaEnable(req('auth/mfa/enable', 'POST', { code: hotp(secret, S) }, u.cookie));
     assert.equal(enabled.status, 200);
@@ -97,7 +106,9 @@ test('invitations, MFA and password reset', async t => {
     const ok = await doLogin(u.email, strong, code);
     assert.equal(ok.status, 200); assert.match(ok.headers.get('set-cookie'), /HttpOnly/);
     assert.equal((await doLogin(u.email, strong, code)).status, 401, 'TOTP replay refused');
-    assert.equal((await doLogin(u.email, strong, recoveryCodes[0])).status, 200);
+    const recovered = await doLogin(u.email, strong, recoveryCodes[0]);
+    assert.equal(recovered.status, 200);
+    u.cookie = sessionFrom(recovered);
     assert.equal((await doLogin(u.email, strong, recoveryCodes[0])).status, 401, 'recovery code is single use');
     assert.equal((await mfaDisable(req('auth/mfa/disable', 'POST', { password: 'wrong-password-123', code: recoveryCodes[1] }, u.cookie))).status, 401);
     assert.equal((await mfaDisable(req('auth/mfa/disable', 'POST', { password: strong, code: recoveryCodes[1] }, u.cookie))).status, 200);

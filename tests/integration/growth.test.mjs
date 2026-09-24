@@ -4,6 +4,13 @@ import { randomUUID } from 'node:crypto';
 import { db } from '../../lib/db.ts';
 import { encrypt, hashPassword } from '../../lib/crypto.ts';
 import { createSession, sessionCookie } from '../../lib/auth.ts';
+function sessionFrom(response) {
+  const all = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [response.headers.get('set-cookie') ?? ''];
+  const raw = all.find(c => c.startsWith(`${sessionCookie}=`));
+  const token = raw?.match(new RegExp(`^${sessionCookie}=([^;]+)`))?.[1];
+  if (!token) throw new Error('login did not set a session cookie');
+  return `${sessionCookie}=${token}`;
+}
 import { attributionToken } from '../../lib/calendly.ts';
 import { reserveProviderSpend } from '../../lib/usage.ts';
 import { sendAllowance, assertCanActivateCampaign } from '../../lib/entitlements.ts';
@@ -183,6 +190,7 @@ test('operator console data, theme preference and members list are permissioned 
     const admin = await db.user.findUniqueOrThrow({ where: { id: A.adminUser.id } });
     const res = await login(req('auth/login', 'POST', { email: admin.email, password: 'a-long-test-password-1' }));
     assert.equal(res.status, 200, await res.clone().text()); const cookies = res.headers.get('set-cookie'); assert.match(cookies, /HttpOnly/); assert.match(cookies, /lm_theme=ocean/);
+    A.admin = sessionFrom(res);
   });
   await t.test('the members list is admin-only, tenant-scoped and contains no secrets', async () => {
     assert.equal((await usersRoute(req('users', 'GET', undefined, ''))).status, 401);
