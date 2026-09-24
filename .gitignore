@@ -1,6 +1,10 @@
 node_modules/
 .next/
 .env
+.env.dev
+.env.prod
+.env.dev.example
+.env.prod.example
 .env.*
 !.env.example
 !.env.*.example
@@ -12,3 +16,6 @@ node_modules/
 test-results/
 playwright-report/
 coverage/
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat

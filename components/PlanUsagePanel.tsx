@@ -17,11 +17,13 @@ export default function PlanUsagePanel() {
     {info.trialExpired && info.enforced && <p role="alert" className="error">Your trial has ended. Sending and discovery are paused until your plan is upgraded. <a href="/request-access">Contact us</a>.</p>}
     <div className="cards">
       {(Object.keys(LIMIT_LABELS) as Array<keyof Limits>).map(k => {
-        const used = info.usage[k], limit = info.limits[k], pct = limit === -1 ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
-        return <div className="card" key={k}>
-          <span className="muted">{LIMIT_LABELS[k]}</span>
+        const used = info.usage[k], limit = info.limits[k], over = limit !== -1 && used > limit;
+        const pct = limit === -1 ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+        const label = `${LIMIT_LABELS[k]} ${used.toLocaleString('en-US')} of ${formatLimit(limit)}${over ? ', over limit' : ''}`;
+        return <div className={over ? 'card warn' : 'card'} key={k}>
+          <span className="muted">{LIMIT_LABELS[k]}{over && <span className="pill" style={{ marginLeft: 6 }}>Over limit</span>}</span>
           <strong>{used.toLocaleString('en-US')} <span className="muted" style={{ fontSize: 15, fontWeight: 500 }}>/ {formatLimit(limit)}</span></strong>
-          {limit !== -1 && <div className="meter" role="progressbar" aria-label={`${LIMIT_LABELS[k]} used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}><span style={{ width: `${pct}%` }} /></div>}
+          {limit !== -1 && <div className="meter" role="progressbar" aria-label={label} aria-valuetext={label} aria-valuemin={0} aria-valuemax={Math.max(limit, used)} aria-valuenow={used}><span style={{ width: `${pct}%` }} /></div>}
         </div>;
       })}
     </div>
