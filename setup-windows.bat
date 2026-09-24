@@ -143,7 +143,11 @@ function Ensure-Docker {
     $docker = Get-CommandPath 'docker'
     if ($docker) {
       try {
-        & $docker info 2>$null | Out-Null
+        # Windows PowerShell turns native stderr into a terminating error when
+        # ErrorActionPreference is Stop. docker info warns on stderr even when healthy.
+        $pref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { & $docker info 2>$null | Out-Null } finally { $ErrorActionPreference = $pref }
         if ($LASTEXITCODE -eq 0) {
           Write-Ok 'Docker engine is ready.'
           return
@@ -322,7 +326,11 @@ function Invoke-Seed([string]$Root) {
     $prev = $env:SEED_PASSWORD
     $env:SEED_PASSWORD = $password
     try {
-      & $docker compose --env-file $item.Env -p $item.Project -f docker-compose.selfhosted.yml run --rm -e SEED_PASSWORD web node --import tsx scripts/seed-initial.ts
+      $pref = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try {
+        & $docker compose --env-file $item.Env -p $item.Project -f docker-compose.selfhosted.yml run --rm -e SEED_PASSWORD web node --import tsx scripts/seed-initial.ts
+      } finally { $ErrorActionPreference = $pref }
       if ($LASTEXITCODE -ne 0) { throw "Seed failed for $($item.Project)" }
     } finally {
       if ($null -eq $prev) { Remove-Item Env:SEED_PASSWORD -ErrorAction SilentlyContinue } else { $env:SEED_PASSWORD = $prev }
