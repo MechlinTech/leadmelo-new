@@ -19,7 +19,7 @@ export default function TeamMembers() {
     {!members ? <p role="status" className="muted">Loading members…</p> : <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table>
       <caption className="sr-only">Members of this workspace</caption>
       <thead><tr><th scope="col">Email</th><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Two-factor</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
-      <tbody>{members.map(m => <tr key={m.id}><td>{m.email}{m.you && <span className="pill" style={{ marginLeft: 6 }}>You</span>}</td><td>{m.name ?? '–'}</td><td>{m.role.replace('_', ' ').toLowerCase()}</td><td>{m.mfaEnabled ? 'On' : 'Off'}</td>
+      <tbody>{members.map(m => <tr key={m.id}><td>{m.email}{m.you && <span className="pill" style={{ marginLeft: 6 }}>You</span>}</td><td>{m.name?.trim() || m.email.split('@')[0]}</td><td>{m.role.replace('_', ' ').toLowerCase()}</td><td>{m.mfaEnabled ? 'On' : 'Off'}</td>
         <td>{!m.you && !m.disabled && <button type="button" className="secondary" disabled={busy} onClick={() => void reset(m)}>Create reset link</button>}</td></tr>)}</tbody>
     </table></div>}
   </section>;

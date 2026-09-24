@@ -74,6 +74,7 @@ test('operational detectors and tenant digest', async t => {
     await raiseOne(B.tenant.id);
     const d = await buildDigest(B.tenant.id);
     assert.deepEqual(d.activity, { emailsSent: 1, emailsFailed: 1, replies: 2, positiveReplies: 1, meetingsBooked: 1, meetingsCancelled: 0 });
+    assert.equal((await buildDigest(B.tenant.id, new Date(), 168)).activity.emailsSent, 2, '7-day window includes older sends');
     assert.equal(d.upcomingMeetings, 1); assert.equal(d.activeCampaigns, 1);
     assert.deepEqual(d.openAlerts, { reply_review: 1 }); assert.equal(d.needsAttention, 1);
     assert.equal((await buildDigest(A.tenant.id)).activity.meetingsBooked, 0, 'no leakage across tenants');

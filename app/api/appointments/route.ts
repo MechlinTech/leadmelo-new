@@ -4,7 +4,46 @@ import { authenticate } from '../../../lib/auth';
 import { endpoint, HttpError, jsonBody } from '../../../lib/http';
 export const GET = endpoint(async req => {
   const user = await authenticate(req);
-  return Response.json(await db.appointment.findMany({ where: { tenantId: user.tenantId }, include: { contact: true, campaign: true }, orderBy: { scheduledStart: 'desc' }, take: 100 }));
+  const hours = Number(new URL(req.url).searchParams.get('hours') ?? 0);
+  const since = hours > 0 ? new Date(Date.now() - hours * 3600000) : undefined;
+  return Response.json(await db.appointment.findMany({
+    where: { tenantId: user.tenantId, ...(since ? { OR: [{ scheduledStart: { gte: since } }, { createdAt: { gte: since } }] } : {}) },
+    include: { contact: true, campaign: true },
+    orderBy: { scheduledStart: 'desc' },
+    take: 500
+  }));
+});
+export const POST = endpoint(async req => {
+  const user = await authenticate(req, true);
+  const body = z.object({
+    buyerName: z.string().trim().min(1).max(200),
+    buyerEmail: z.string().email(),
+    scheduledStart: z.string().min(1).refine(v => !Number.isNaN(Date.parse(v)), 'Not a real date'),
+    campaignId: z.string().optional(),
+    notes: z.string().trim().max(2000).optional()
+  }).strict().parse(await jsonBody(req));
+  const email = body.buyerEmail.toLowerCase();
+  const contact = await db.contact.upsert({
+    where: { tenantId_email: { tenantId: user.tenantId, email } },
+    update: { fullName: body.buyerName },
+    create: { tenantId: user.tenantId, fullName: body.buyerName, email }
+  });
+  if (body.campaignId && !await db.campaign.findFirst({ where: { id: body.campaignId, tenantId: user.tenantId } })) throw new HttpError(404, 'campaign_not_found');
+  const start = new Date(body.scheduledStart);
+  const appointment = await db.appointment.create({
+    data: {
+      tenantId: user.tenantId,
+      contactId: contact.id,
+      campaignId: body.campaignId,
+      status: 'BOOKED',
+      scheduledStart: start,
+      scheduledEnd: new Date(start.getTime() + 30 * 60000),
+      qualificationNotes: body.notes ?? 'Manually recorded for verification',
+      outcomeReason: 'manual_test_booking'
+    },
+    include: { contact: true, campaign: true }
+  });
+  return Response.json(appointment, { status: 201 });
 });
 export const PATCH = endpoint(async req => {
   const user = await authenticate(req, true);
