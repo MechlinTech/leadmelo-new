@@ -86,6 +86,7 @@ export default function Workspace({ section }: { section: Section }) {
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }, [section, meetingHours]);
+  useEffect(() => { if (section === 'overview') console.log('latest deployment'); }, [section]);
   useEffect(() => { void load(); }, [load]);
   async function mutate(path: string, method: string, body?: unknown) {
     setBusy(true); setError(''); setNotice('');
