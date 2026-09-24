@@ -88,6 +88,21 @@ test('every required file named by the handoff audit exists, and every migration
   for (const f of ['gateway/README.md', 'docs/SCHEMA_REFERENCE.md', 'docs/CALENDLY.md', 'deploy/monitor/external-monitor.sh', 'scripts/privacy-erasures.ts']) assert.ok(audit.includes(f), `handoff_audit requires ${f}`);
 });
 
+test('deploy fails unless the new commit image replaced the running web container', () => {
+  const deploy = readFileSync('scripts/deploy.ps1', 'utf8');
+  const writer = readFileSync('scripts/write-deploy-env.ps1', 'utf8');
+  assert.match(deploy, /--force-recreate/);
+  assert.match(deploy, /web container was not recreated/);
+  assert.match(deploy, /still serving the previous release/);
+  assert.match(writer, /RELEASE_TAG'\] = \$ReleaseTag/);
+  assert.match(writer, /C:\\leadmelo/);
+  for (const workflow of ['.github/workflows/deploy-dev.yml', '.github/workflows/deploy-prod.yml']) {
+    const text = readFileSync(workflow, 'utf8');
+    assert.match(text, /write-deploy-env\.ps1/);
+    assert.match(text, /RELEASE_TAG: "\$\{\{ github\.sha \}\}"/);
+  }
+});
+
 test('shell scripts are syntactically valid bash', posixOnly, () => {
   const bash = process.env.BASH_BIN ?? 'bash';
   for (const f of ['scripts/backup_postgres.sh', 'scripts/restore_postgres.sh', 'scripts/check_backup.sh', 'scripts/preflight.sh', 'scripts/ci-restore.sh', 'deploy/monitor/external-monitor.sh']) {
