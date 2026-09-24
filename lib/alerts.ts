@@ -1,8 +1,16 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { db } from './db';
+import { readWorkspaceConfig } from './workspaceConfig';
+import { applyRulesForAlert, shouldRaise } from './automationRules';
 
 export async function raiseAlert(tenantId: string, code: string, entityId: string) {
-  return db.operationalAlert.upsert({where:{key:`${tenantId}:${code}:${entityId}`},update:{},create:{tenantId,key:`${tenantId}:${code}:${entityId}`,code,entityId}});
+  const config = await readWorkspaceConfig(tenantId);
+  if (!shouldRaise(code, config)) {
+    return await db.operationalAlert.findUnique({ where: { key: `${tenantId}:${code}:${entityId}` } }) ?? { id: '', tenantId, key: `${tenantId}:${code}:${entityId}`, code, entityId };
+  }
+  const alert = await db.operationalAlert.upsert({where:{key:`${tenantId}:${code}:${entityId}`},update:{},create:{tenantId,key:`${tenantId}:${code}:${entityId}`,code,entityId}});
+  await applyRulesForAlert(tenantId, code, config);
+  return alert;
 }
 // State-based detectors. The entity id carries a UTC day so a condition that persists after
 // acknowledgement is re-raised at most once a day, instead of never (or every tick).
@@ -30,12 +38,14 @@ export async function collectAlerts() {
   for (const r of await db.mailReceipt.findMany({where:{status:{in:['CREATING','SUBMITTING','AMBIGUOUS']},updatedAt:{lt:new Date(Date.now()-120000)}},take:100})) await raiseAlert(r.tenantId,'m365_send_needs_reconciliation',r.id);
 }
 export async function deliverAlert(now = new Date(), transport: typeof fetch = fetch) {
-  const target = process.env.ALERT_WEBHOOK_URL, secret = process.env.ALERT_WEBHOOK_SECRET;
+  const alert = await db.operationalAlert.findFirst({where:{deliveredAt:null,acknowledgedAt:null,attempts:{lt:6},nextAttemptAt:{lte:now},OR:[{leaseUntil:null},{leaseUntil:{lt:now}}]},orderBy:{createdAt:'asc'}});
+  if (!alert) return false;
+  const config = await readWorkspaceConfig(alert.tenantId);
+  const target = process.env.ALERT_WEBHOOK_URL || config.alerts.webhookUrl;
+  const secret = process.env.ALERT_WEBHOOK_SECRET;
   if (!target || !secret) return false;
   const url = new URL(target);
   if (url.protocol !== 'https:' || url.username || url.password) throw new Error('alert_url_requires_https');
-  const alert = await db.operationalAlert.findFirst({where:{deliveredAt:null,acknowledgedAt:null,attempts:{lt:6},nextAttemptAt:{lte:now},OR:[{leaseUntil:null},{leaseUntil:{lt:now}}]},orderBy:{createdAt:'asc'}});
-  if (!alert) return false;
   const token = randomUUID();
   const claim = await db.operationalAlert.updateMany({where:{id:alert.id,attempts:alert.attempts,OR:[{leaseUntil:null},{leaseUntil:{lt:now}}]},data:{attempts:{increment:1},leaseToken:token,leaseUntil:new Date(now.getTime()+60000)}});
   if (!claim.count) return false;

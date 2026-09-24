@@ -17,15 +17,19 @@ export default function SecuritySettings() {
   const enable = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const data = new FormData(e.currentTarget); return run(async () => {
     setCodes((await api<{ recoveryCodes: string[] }>('auth/mfa/enable', 'POST', { code: String(data.get('code')) })).recoveryCodes); setMfa(null);
   }); };
-  return <section aria-labelledby="security-title">
+  return <>
+  <section aria-labelledby="security-title">
     <h2 id="security-title">Your sign-in security</h2>
     {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
     {codes ? <div role="status"><p><strong>Two-factor authentication is on.</strong> Save these recovery codes now. Each works once and they will not be shown again.</p><pre>{codes.join('\n')}</pre><button onClick={() => setCodes(null)}>I have saved them</button></div>
       : mfa ? <form className="editor" onSubmit={enable}><p>Add this key to an authenticator app (manual entry, time-based), then enter the 6-digit code it shows.</p><pre aria-label="Authenticator key">{mfa.secret}</pre><details><summary>Setup URI</summary><pre>{mfa.otpauthUri}</pre></details><label>6-digit code<input className="input" name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required/></label><button disabled={busy}>Turn on two-factor authentication</button></form>
       : <button disabled={busy} onClick={() => void run(async () => setMfa(await api('auth/mfa/setup', 'POST', {})))}>Set up two-factor authentication</button>}
-    <h2>Team</h2>
+  </section>
+    <section aria-labelledby="team-title">
+    <h2 id="team-title">Team</h2>
     <form className="editor" onSubmit={invite}><div className="formGrid"><label>Invite by email<input className="input" name="email" type="email" required/></label><label>Role<select name="role" defaultValue="MEMBER"><option value="MEMBER">Member (view)</option><option value="MANAGER">Manager (run campaigns)</option><option value="TENANT_ADMIN">Administrator</option></select></label></div><button disabled={busy}>Create invitation</button></form>
     {link && <p>Invitation link: <code>{link}</code></p>}
     {invites.length > 0 && <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><caption className="muted">Pending invitations</caption><thead><tr><th>Email</th><th>Role</th><th>Expires</th><th><span className="skip">Action</span></th></tr></thead><tbody>{invites.map(i => <tr key={i.id}><td>{i.email}</td><td>{i.role}</td><td>{new Date(i.expiresAt).toLocaleString()}</td><td><button disabled={busy} onClick={() => void run(async () => { await api(`invites?id=${encodeURIComponent(i.id)}`, 'DELETE'); await loadInvites(); })}>Revoke</button></td></tr>)}</tbody></table></div>}
-  </section>;
+  </section>
+  </>;
 }

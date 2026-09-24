@@ -1,7 +1,7 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
-import { cookies, headers } from 'next/headers';
-import { THEME_COOKIE, isThemeId } from '../lib/themes';
+import { headers } from 'next/headers';
+import { themeFromHeader } from '../lib/themes';
 import PwaRegister from '../components/PwaRegister';
 
 export const dynamic = 'force-dynamic';
@@ -18,12 +18,12 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const nonce = (await headers()).get('x-nonce') ?? undefined;
-  const stored = (await cookies()).get(THEME_COOKIE)?.value;
-  const theme = isThemeId(stored) ? stored : 'system';
-  return <html lang="en" data-theme={theme}>
-    <body>
-      <script src="/leadmelo-boot.js" nonce={nonce} />
+  const h = await headers();
+  const nonce = h.get('x-nonce') ?? undefined;
+  const theme = themeFromHeader(h.get('x-theme'));
+  return <html lang="en" data-theme={theme} suppressHydrationWarning>
+    <body suppressHydrationWarning>
+      <script src="/leadmelo-boot.js" nonce={nonce} suppressHydrationWarning />
       <a className="skip" href="#main">Skip to content</a>{children}<PwaRegister />
     </body>
   </html>;

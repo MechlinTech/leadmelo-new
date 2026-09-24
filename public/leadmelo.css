@@ -88,6 +88,7 @@ details summary{cursor:pointer;min-height:32px}
 .site-nav a{padding:10px 12px;color:var(--text);text-decoration:none;border-radius:8px;min-height:44px;display:inline-flex;align-items:center}
 .site-nav a:hover{background:var(--accent-soft)}
 .site-nav a.btn{color:var(--accent-text)}
+.site-nav a.btn:hover{color:var(--link);background:var(--accent-soft)}
 .menu-toggle{display:none;margin-left:auto}
 .container{max-width:1180px;margin:auto;padding:0 20px}
 .hero{padding:64px 0 40px;display:grid;grid-template-columns:1.15fr .85fr;gap:40px;align-items:center}

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { THEME_COOKIE } from './lib/themes';
 
 const sessionCookie = 'leadmelo_session';
 
@@ -30,6 +31,8 @@ export function middleware(request: NextRequest) {
   const csp = `default-src 'self'; script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`;
   const headers = new Headers(request.headers);
   headers.set('x-nonce', nonce);
+  headers.set('x-theme', request.cookies.get(THEME_COOKIE)?.value ?? 'system');
+  headers.set('x-signed-in', request.cookies.get(sessionCookie)?.value ? '1' : '0');
   headers.set('Content-Security-Policy', csp);
   const response = NextResponse.next({ request: { headers } });
   response.headers.set('Content-Security-Policy', csp);

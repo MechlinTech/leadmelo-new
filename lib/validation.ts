@@ -67,5 +67,6 @@ export const settingsInput = z.object({
   aiBaseUrl: z.string().trim().max(300).nullable().optional(),
   aiModel: z.string().trim().min(1).max(120).nullable().optional(),
   aiKey: z.string().max(2000).optional(),
-  aiFeatures: z.array(z.enum(['campaign_assist', 'reply_assist'])).max(2).optional()
+  aiFeatures: z.array(z.enum(['campaign_assist', 'reply_assist'])).max(2).optional(),
+  companyName: z.string().trim().min(2).max(120).optional()
 }).strict();
