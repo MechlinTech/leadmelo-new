@@ -1,0 +1,45 @@
+name: deploy-production
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, leadmelo-prod]
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write environment file
+        shell: powershell
+        env:
+          APP_URL: "${{ secrets.APP_URL || vars.APP_URL }}"
+          HOST_PORT: "${{ vars.HOST_PORT }}"
+          COMPOSE_PROJECT_NAME: "${{ vars.COMPOSE_PROJECT_NAME }}"
+          POSTGRES_DB: "${{ vars.POSTGRES_DB }}"
+          RELEASE_TAG: "${{ github.sha }}"
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          APP_DB_PASSWORD: ${{ secrets.APP_DB_PASSWORD }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
+          PROVIDER_GATEWAY_URL: ${{ secrets.PROVIDER_GATEWAY_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_SECRET: ${{ secrets.ALERT_WEBHOOK_SECRET }}
+        run: |
+          if (-not $env:APP_URL) { $env:APP_URL = 'http://localhost:7677' }
+          if (-not $env:HOST_PORT) { $env:HOST_PORT = '7677' }
+          if (-not $env:COMPOSE_PROJECT_NAME) { $env:COMPOSE_PROJECT_NAME = 'leadmelo-prod' }
+          if (-not $env:POSTGRES_DB) { $env:POSTGRES_DB = 'leadmelo_prod' }
+          & ./scripts/write-deploy-env.ps1 -Environment production -ReleaseTag $env:RELEASE_TAG
+      - name: Deploy Docker stack
+        shell: powershell
+        run: ./scripts/deploy.ps1 -Environment production

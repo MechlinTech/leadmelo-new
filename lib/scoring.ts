@@ -1,0 +1,2 @@
+export type LeadSignal={qaJobs:number;automation:boolean;performance:boolean;playwright:boolean;selenium:boolean;apiTesting?:boolean;funding:boolean;decisionMaker:boolean;verifiedEmail?:boolean;calendarFit?:boolean};
+export function scoreLead(s:LeadSignal){let n=0;n+=Math.min(s.qaJobs*5,30);if(s.automation)n+=15;if(s.performance)n+=15;if(s.playwright)n+=10;if(s.selenium)n+=10;if(s.apiTesting)n+=5;if(s.funding)n+=10;if(s.decisionMaker)n+=10;if(s.verifiedEmail)n+=5;if(s.calendarFit)n+=5;return Math.min(n,100)}

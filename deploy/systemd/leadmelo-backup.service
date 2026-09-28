@@ -1,0 +1,13 @@
+[Unit]
+Description=LeadMelo encrypted PostgreSQL backup
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/leadmelo
+EnvironmentFile=/etc/leadmelo/backup.env
+ExecStart=/bin/bash /opt/leadmelo/scripts/backup_postgres.sh
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

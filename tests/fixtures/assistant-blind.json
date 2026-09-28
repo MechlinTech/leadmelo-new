@@ -1,0 +1,17 @@
+[
+ ["Can you actually get me booked calls with decision makers?", "guarantee"],
+ ["What information do I have to give to set up a target audience?", "icp"],
+ ["Is my sending mailbox connected securely?", "email-providers"],
+ ["When a lead books, how does the system know it was booked?", "scheduling"],
+ ["Do I have to sign off on everything before it goes out?", "modes"],
+ ["What does the tool do with an out of office message?", "replies"],
+ ["Does it follow anti-spam laws?", "safety"],
+ ["Is two step verification available?", "security"],
+ ["What are your prices per month?", "plan-overview"],
+ ["Can I use it on a tablet?", "mobile"],
+ ["Is there a night theme?", "themes"],
+ ["What do I get when I subscribe to the middle plan?", "plan-detail:GROWTH"],
+ ["My campaign shows a warning and won't start, what should I check?", "app-not-sending"],
+ ["How do I let a new employee into my workspace?", "app-invite"],
+ ["I am not getting any meetings, what should I improve?", "app-no-meetings"]
+]

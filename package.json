@@ -1,0 +1,51 @@
+{
+  "name": "leadmelo",
+  "version": "20.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.14 <25"
+  },
+  "overrides": {
+    "postcss": "8.5.28",
+    "deepmerge-ts": "8.0.2"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "test:integration": "node --import tsx --test --test-concurrency=1 tests/integration/*.test.mjs",
+    "test:isolated": "node scripts/test-isolated.mjs",
+    "test:http": "node --import tsx scripts/smoke-http.mjs",
+    "worker": "node --import tsx worker/index.ts",
+    "gateway": "node --import tsx gateway/src/main.ts",
+    "db:validate": "prisma validate",
+    "db:generate": "prisma generate",
+    "db:deploy": "prisma migrate deploy",
+    "privacy:erasures": "node --import tsx scripts/privacy-erasures.ts",
+    "docs:schema": "node scripts/generate-schema-docs.mjs",
+    "bootstrap": "node --import tsx scripts/bootstrap.ts",
+    "audit:handoff": "python3 scripts/handoff_audit.py"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "next": "15.5.25",
+    "react": "19.1.9",
+    "react-dom": "19.1.9",
+    "tsx": "4.20.6",
+    "zod": "3.24.2"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-socket": "0.2.11",
+    "@types/node": "22.13.14",
+    "@types/react": "19.0.12",
+    "axe-core": "^4.13.0",
+    "playwright-core": "^1.63.0",
+    "prisma": "6.19.3",
+    "typescript": "5.8.2",
+    "yaml": "^2.9.1"
+  }
+}
