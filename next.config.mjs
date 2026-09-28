@@ -1,12 +1,3 @@
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-
-
-var require = createRequire(import.meta.url);
-var module = { exports: {} };
-
-
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
