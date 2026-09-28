@@ -1,10 +1,4 @@
-'use client';
-import { useEffect } from 'react';
+import type { Metadata } from 'next';
 import Workspace from '../../components/Workspace';
-
-export default function Page() {
-  useEffect(() => {
-    console.log('This is leadmelo');
-  }, []);
-  return <Workspace section="overview"/>;
-}
+export const metadata: Metadata = { title: 'Meetings' };
+export default function Page() { return <Workspace section="overview"/>; }

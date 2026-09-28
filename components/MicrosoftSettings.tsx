@@ -9,13 +9,13 @@ export default function MicrosoftSettings() {
   e.preventDefault();const form=e.currentTarget;const data=new FormData(form);setBusy(true);setError('');setNotice('');
   try{
    const body={directoryId:String(data.get('directoryId')),clientId:String(data.get('clientId')),clientSecret:String(data.get('clientSecret')),mailboxes:String(data.get('mailboxes')).split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),mailboxScopeConfirmed:data.get('scope')==='on'};
-   const r=await fetch('/api/integrations/m365',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await r.json();if(!r.ok)throw new Error(result.error);
+   const r=await fetch('/api/integrations/m365',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await r.json();if(!r.ok)throw new Error(result.error ?? 'Could not save Microsoft connection');
    form.reset();await load();setNotice('Saved securely. This does not certify live delivery. Reply sync and sender-health checks must pass before activation.');
   }catch(e){setError((e as Error).message);}finally{setBusy(false);}
  }
  async function disconnect(){setBusy(true);setError('');try{const r=await fetch('/api/integrations/m365',{method:'DELETE'});if(!r.ok)throw new Error((await r.json()).error);await load();setNotice('Microsoft sending disabled and active campaigns paused.');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
- return <section><h2>Microsoft 365</h2><p>Admin-managed application connection. Configure scoped mailbox access in Microsoft before saving. No Microsoft sign-in or admin-consent wizard is included.</p>
- {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
+ return <section aria-labelledby="m365-title"><h2 id="m365-title">Microsoft 365</h2><p>Admin-managed application connection. Configure scoped mailbox access in Microsoft before saving. No Microsoft sign-in or admin-consent wizard is included.</p>
+ {error&&<p role="alert" className="error">{error}</p>}{notice&&<p role="status">{notice}</p>}
  <p>{connection?connection.enabled?'Configured — live acceptance still required':'Disabled':'Not configured'}</p>
  <form className="editor" onSubmit={submit} key={connection?.clientId??'new'}>
  <div className="formGrid">

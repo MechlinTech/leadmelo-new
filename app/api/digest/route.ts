@@ -4,5 +4,6 @@ import { buildDigest } from '../../../lib/digest';
 
 export const GET = endpoint(async req => {
   const user = await authenticate(req);
-  return Response.json(await buildDigest(user.tenantId));
+  const hours = Number(new URL(req.url).searchParams.get('hours') ?? 24);
+  return Response.json(await buildDigest(user.tenantId, new Date(), hours));
 });

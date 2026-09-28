@@ -25,6 +25,9 @@ export function themeCss() {
 }
 // Runs before first paint (an external script would be blocked by the nonce CSP if inline): the server
 // reads the cookie instead, so there is no flash and no inline script.
+export function themeFromHeader(value: string | null | undefined): ThemeId {
+  return isThemeId(value) ? value : 'system';
+}
 export function themeFromCookie(header: string | null | undefined): ThemeId {
   const match = header?.split(';').map(x => x.trim()).find(x => x.startsWith(`${THEME_COOKIE}=`))?.slice(THEME_COOKIE.length + 1);
   return isThemeId(match) ? match : 'system';

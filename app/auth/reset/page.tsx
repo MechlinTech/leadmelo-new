@@ -1,5 +1,7 @@
+import type { Metadata } from 'next';
 import Logo from '../../../components/Logo';
 import AccountLink from '../../../components/AccountLink';
+export const metadata: Metadata = { title: 'Reset password' };
 export const dynamic = 'force-dynamic';
 export default async function Page({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const { token = '' } = await searchParams;

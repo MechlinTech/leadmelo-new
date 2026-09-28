@@ -7,7 +7,7 @@ import { campaignReady } from '../../../lib/campaigns';
 import { assertCanActivateCampaign } from '../../../lib/entitlements';
 export const GET = endpoint(async req => {
   const user = await authenticate(req);
-  return Response.json(await db.campaign.findMany({ where: { tenantId: user.tenantId }, include: { icp: true, sequenceSteps: true, _count: { select: { enrollments: true, appointments: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }));
+  return Response.json(await db.campaign.findMany({ where: { tenantId: user.tenantId }, include: { icp: true, sequenceSteps: true, _count: { select: { enrollments: true, appointments: true } } }, orderBy: { createdAt: 'desc' }, take: 500 }));
 });
 export const POST = endpoint(async req => {
   const user = await authenticate(req, true);

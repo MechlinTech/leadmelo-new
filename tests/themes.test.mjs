@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PALETTES, THEME_IDS, THEME_LABELS, themeCss, themeFromCookie, contrast, isThemeId } from '../lib/themes.ts';
+import { PALETTES, THEME_IDS, THEME_LABELS, themeCss, themeFromCookie, themeFromHeader, contrast, isThemeId } from '../lib/themes.ts';
 
 test('every theme meets WCAG AA contrast for text, muted text, links, buttons, errors and focus rings', () => {
   const failures = [];
@@ -26,6 +26,8 @@ test('theme list, labels, CSS and cookie parsing agree', () => {
   assert.equal(themeFromCookie('a=1; lm_theme=ocean; b=2'), 'ocean');
   assert.equal(themeFromCookie('lm_theme=hacker'), 'system', 'unknown values fall back to system');
   assert.equal(themeFromCookie(null), 'system');
+  assert.equal(themeFromHeader('ocean'), 'ocean');
+  assert.equal(themeFromHeader('nope'), 'system');
   assert.ok(!isThemeId('"><script>'), 'a cookie value can never inject markup into the html attribute');
   assert.ok(contrast('#000000', '#ffffff') > 20.9);
 });

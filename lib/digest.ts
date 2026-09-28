@@ -1,9 +1,10 @@
 import { db } from './db';
 import { usageSummary } from './usage';
 
-// Tenant-scoped operating summary for the last 24 hours. Counts only; no contact data.
-export async function buildDigest(tenantId: string, now = new Date()) {
-  const since = new Date(now.getTime() - 86400000);
+// Tenant-scoped operating summary. Window is 24, 168 or 720 hours. Counts only; no contact data.
+export async function buildDigest(tenantId: string, now = new Date(), hours = 24) {
+  const windowHours = [24, 168, 720].includes(hours) ? hours : 24;
+  const since = new Date(now.getTime() - windowHours * 3600000);
   const [sent, failed, replies, positive, booked, cancelled, activeCampaigns, alertRows, upcoming, usage] = await Promise.all([
     db.outreachEvent.count({ where: { tenantId, status: 'SENT', sentAt: { gte: since } } }),
     db.outreachEvent.count({ where: { tenantId, status: 'FAILED', createdAt: { gte: since } } }),

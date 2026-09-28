@@ -36,7 +36,7 @@ export default function Page() {
         </div>
         <div className="panel" aria-label="The autopilot loop">
           <h2 style={{ marginTop: 0, fontSize: 20 }}>The autopilot loop</h2>
-          <ol className="flow">{steps.slice(0, 5).map(([t], i) => <li key={t}><span className="n" aria-hidden="true">{i + 1}</span><span>{t}</span></li>)}</ol>
+          <ol className="flow">{steps.map(([t], i) => <li key={t}><span className="n" aria-hidden="true">{i + 1}</span><span>{t}</span></li>)}</ol>
         </div>
       </section>
     </div>

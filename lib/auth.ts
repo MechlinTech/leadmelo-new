@@ -8,14 +8,16 @@ const loopback = new Set(['localhost', '127.0.0.1', '::1']);
 export function assertOrigin(req: Request) {
   const origin = req.headers.get('origin');
   if (!origin) throw new HttpError(403, 'origin_not_allowed');
-  const expected = new URL(process.env.APP_URL ?? 'http://localhost:7676');
+  const fallback = process.env.NODE_ENV === 'production' ? 'http://localhost:7676' : 'http://localhost:3000';
+  const expected = new URL(process.env.APP_URL ?? fallback);
   let actual: URL;
   try { actual = new URL(origin); } catch { throw new HttpError(403, 'origin_not_allowed'); }
   if (actual.origin === expected.origin) return;
   const expectedPort = expected.port || (expected.protocol === 'https:' ? '443' : '80');
   const actualPort = actual.port || (actual.protocol === 'https:' ? '443' : '80');
+  const dev = process.env.NODE_ENV !== 'production';
   const sameLoopback = loopback.has(expected.hostname) && loopback.has(actual.hostname)
-    && actual.protocol === expected.protocol && actualPort === expectedPort;
+    && actual.protocol === expected.protocol && (actualPort === expectedPort || dev);
   if (!sameLoopback) throw new HttpError(403, 'origin_not_allowed');
 }
 export async function rateLimit(key: string, limit: number, minutes: number) {
@@ -44,7 +46,10 @@ export async function authenticate(req: Request, write = false) {
 }
 export async function createSession(userId: string) {
   const token = randomBytes(32).toString('hex');
-  await db.session.create({ data: { userId, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 8 * 3600000) } });
+  await db.$transaction([
+    db.session.deleteMany({ where: { userId } }),
+    db.session.create({ data: { userId, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + 8 * 3600000) } })
+  ]);
   return token;
 }
 export function cookieHeader(token: string, maxAge = 28800) {
