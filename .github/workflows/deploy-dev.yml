@@ -27,6 +27,7 @@ jobs:
           OUTBOUND_ENABLED: "${{ vars.OUTBOUND_ENABLED }}"
           PLAN_ENFORCEMENT: "${{ vars.PLAN_ENFORCEMENT }}"
           SENDER_HEALTH_AUTO: "${{ vars.SENDER_HEALTH_AUTO }}"
+          PROVIDER_GATEWAY_URL: "${{ vars.PROVIDER_GATEWAY_URL }}"
           COMPOSE_PROJECT_NAME: "${{ vars.COMPOSE_PROJECT_NAME }}"
           POSTGRES_DB: "${{ vars.POSTGRES_DB }}"
           RELEASE_TAG: "${{ github.sha }}"
