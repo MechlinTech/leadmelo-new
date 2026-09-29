@@ -59,7 +59,7 @@ test('data-subject export, erasure, restore re-application and retention', async
   await t.test('erasure removes personal data, keeps the suppression record, and leaves other tenants untouched', async () => {
     const res = await eraseRoute(req('privacy/erase', { email, confirm: true }, A.admin));
     assert.equal(res.status, 200);
-    assert.deepEqual((await res.json()).erased, { contact: 1, replies: 1, messages: 2, appointments: 1, leads: 1 });
+    assert.deepEqual((await res.json()).erased, { found: true, contact: 1, replies: 1, messages: 2, appointments: 1, leads: 1 });
     assert.equal(await db.contact.findUnique({ where: { id: a.contact.id } }), null);
     assert.equal(await db.enrollment.count({ where: { campaignId: a.campaign.id } }), 0);
     assert.equal(await db.reply.count({ where: { tenantId: A.tenant.id } }), 0);
@@ -78,11 +78,11 @@ test('data-subject export, erasure, restore re-application and retention', async
     assert.equal(await db.suppression.findUnique({ where: { tenantId_email: { tenantId: B.tenant.id, email } } }), null);
     assert.equal((await (await exportRoute(req('privacy/export', { email }, A.admin))).json()).contact, null, 'export after erasure shows no personal data');
   });
-  await t.test('erasure is idempotent and also works for an address we hold nothing on', async () => {
+  await t.test('erasure is idempotent, and an unknown address is reported as not found', async () => {
     assert.equal((await eraseRoute(req('privacy/erase', { email, confirm: true }, A.admin))).status, 200);
     const r = await (await eraseRoute(req('privacy/erase', { email: 'never-seen@example.com', confirm: true }, A.admin))).json();
-    assert.deepEqual(r.erased, { contact: 0, replies: 0, messages: 0, appointments: 0, leads: 0 });
-    assert.ok(await db.suppression.findUnique({ where: { tenantId_email: { tenantId: A.tenant.id, email: 'never-seen@example.com' } } }));
+    assert.deepEqual(r.erased, { found: false, contact: 0, replies: 0, messages: 0, appointments: 0, leads: 0 });
+    assert.equal(await db.suppression.findUnique({ where: { tenantId_email: { tenantId: A.tenant.id, email: 'never-seen@example.com' } } }), null);
   });
   await t.test('after a restore that resurrects erased data, re-applying the exported ledger removes it again', async () => {
     const ledger = await exportErasureLedger();
@@ -93,7 +93,7 @@ test('data-subject export, erasure, restore re-application and retention', async
     const revived = await db.contact.create({ data: { tenantId: A.tenant.id, fullName: 'Sam Subject', email } });
     await db.reply.create({ data: { tenantId: A.tenant.id, contactId: revived.id, intent: 'NEUTRAL', rawSnippet: 'resurrected' } });
     const result = await reapplyErasures([...ledger, { tenantId: 'deleted-tenant', email: 'x@example.com' }]);
-    assert.equal(result.skipped, 1); assert.ok(result.applied >= 2);
+    assert.equal(result.skipped, 1); assert.ok(result.applied >= 1);
     assert.equal(await db.contact.findUnique({ where: { id: revived.id } }), null);
     assert.equal(await db.reply.count({ where: { tenantId: A.tenant.id } }), 0);
     assert.equal((await db.suppression.findUnique({ where: { tenantId_email: { tenantId: A.tenant.id, email } } })).reason, 'erasure_request');
