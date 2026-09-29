@@ -32,7 +32,8 @@ test('MIME includes opt-out headers and rejects header injection',()=>{
 });
 test('delta cursor cannot escape mailbox or Microsoft origin',()=>{
   assert.ok(validateDeltaLink('https://graph.microsoft.com/v1.0/users/sender%40example.com/mailFolders/inbox/messages/delta?$deltatoken=x','sender@example.com'));
-  for(const url of ['https://evil.example/v1.0/users/sender%40example.com/mailFolders/inbox/messages/delta','https://graph.microsoft.com/v1.0/users/victim%40example.com/mailFolders/inbox/messages/delta']) assert.throws(()=>validateDeltaLink(url,'sender@example.com'));
+  assert.ok(validateDeltaLink("https://graph.microsoft.com/v1.0/users/sender@example.com/mailFolders('inbox')/messages/delta?$deltatoken=x",'sender@example.com'));
+  for(const url of ['https://evil.example/v1.0/users/sender%40example.com/mailFolders/inbox/messages/delta','https://graph.microsoft.com/v1.0/users/victim%40example.com/mailFolders/inbox/messages/delta',"https://graph.microsoft.com/v1.0/users/sender@example.com/mailFolders('sentitems')/messages/delta"]) assert.throws(()=>validateDeltaLink(url,'sender@example.com'));
 });
 test('connection needs explicit mailbox-scope confirmation and questions do not auto-book',()=>{
   assert.ok(!connectionInput.safeParse({directoryId:config.directoryId,clientId:config.clientId,clientSecret:'1234567890123456',mailboxes:config.mailboxes}).success);

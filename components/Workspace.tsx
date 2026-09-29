@@ -88,6 +88,11 @@ export default function Workspace({ section }: { section: Section }) {
   }, [section, meetingHours]);
   useEffect(() => { if (section === 'overview') console.log('latest deployment'); }, [section]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!editingCampaignId) return;
+    const editor = document.getElementById('campaign-editor');
+    editor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [editingCampaignId, campaignFormKey]);
   async function mutate(path: string, method: string, body?: unknown) {
     setBusy(true); setError(''); setNotice('');
     try {
@@ -147,7 +152,10 @@ export default function Workspace({ section }: { section: Section }) {
       body.monthlySpendCapCents = dollars('monthlySpendCap');
       body.providerCostCents = dollars('providerCost') ?? 0;
       body.messageRetentionDays = value(form, 'messageRetentionDays').trim() === '' ? null : number(form, 'messageRetentionDays');
-      await mutate('settings', 'PUT', body);
+      const address = value(form, 'postalAddress').trim();
+      if (address.length < 10) { setError('Enter a full business postal address of at least 10 characters, then save again.'); return; }
+      if (![body.dailySendCap, body.weeklyProspectCap, body.providerCostCents].every(n => Number.isFinite(n))) { setError('Some fields are invalid. Check the values and try again.'); return; }
+      if (await mutate('settings', 'PUT', body)) setNotice('Workspace settings saved.');
     }
   }
   async function submitLead(event: FormEvent<HTMLFormElement>) {
@@ -174,6 +182,7 @@ export default function Workspace({ section }: { section: Section }) {
     const sorted = [...(r.sequenceSteps ?? [])].sort((a: Row, b: Row) => a.stepOrder - b.stepOrder);
     setSteps(sorted.length ? sorted.map((s: Row, i: number) => ({ id: i + 1, delay: s.waitBusinessDays, subject: s.subject ?? '', body: s.body ?? '' })) : [{ id: 1, delay: 0, subject: '', body: FIRST_BODY }]);
     setCampaignFormKey(k => k + 1);
+    requestAnimationFrame(() => document.getElementById('campaign-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
   function cancelCampaignEdit() {
     setEditingCampaignId(null);
@@ -245,9 +254,8 @@ export default function Workspace({ section }: { section: Section }) {
           <label>Status <select aria-label="Filter campaigns by status" value={campaignStatus} onChange={e => { setCampaignStatus(e.target.value); setCampaignPage(1); }}><option value="all">All</option><option value="DRAFT">Draft</option><option value="ACTIVE">Active</option><option value="PAUSED">Paused</option><option value="COMPLETE">Complete</option></select></label>
           <label>Sort <select aria-label="Sort campaigns" value={campaignSort} onChange={e => { setCampaignSort(e.target.value as typeof campaignSort); setCampaignPage(1); }}><option value="newest">Newest</option><option value="name">Name</option><option value="status">Status</option></select></label>
         </div>
-        <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><thead><tr><th>Campaign</th><th>ICP</th><th>Status</th><th>Mode</th><th>Goal</th><th>Control</th></tr></thead><tbody>{campaignPageData.slice.map(r => <tr key={r.id}><td>{r.name}</td><td>{r.icp?.name}</td><td>{r.status}</td><td>{r.automationMode.replaceAll('_', ' ').toLowerCase()}</td><td>{r.weeklyAppointmentGoal}/week</td><td>{canWrite ? <><button disabled={busy} onClick={() => void mutate('campaigns', 'PATCH', { id: r.id, status: r.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' })}>{r.status === 'ACTIVE' ? 'Pause' : 'Activate'}</button><button type="button" className="secondary" disabled={busy} onClick={() => beginEditCampaign(r)}>Edit</button></> : <span className="muted">View only</span>}<CampaignHistory id={r.id} name={r.name} onChanged={() => void load()}/></td></tr>)}</tbody></table></div>
-        <Pager page={campaignPageData.page} pages={campaignPageData.pages} total={campaignPageData.total} label="campaigns" onPage={setCampaignPage}/>
-        <h2>{editingCampaignId ? 'Edit campaign' : 'Create self-running campaign'}</h2>
+        <h2 id="campaign-editor">{editingCampaignId ? `Edit campaign “${editingCampaign?.name ?? ''}”` : 'Create self-running campaign'}</h2>
+        {editingCampaignId && <p role="status">Editing “{editingCampaign?.name}”. Update the form below, then save.</p>}
         {!canWrite && <p className="muted">Members can view campaigns. Creating or starting one requires a manager or administrator.</p>}
         {canWrite && <><AiAssist onApply={applyAi}/>
         <form key={campaignFormKey} className="editor" onSubmit={submit}>
@@ -274,6 +282,8 @@ export default function Workspace({ section }: { section: Section }) {
           {!editingCampaignId && <label><input type="checkbox" name="startImmediately"/> Start the autonomous campaign immediately when all safety and integration checks pass</label>}
           <div className="toolbar"><button type="button" disabled={steps.length >= 10} onClick={() => setSteps([...snapshotSteps(), { id: Date.now(), delay: 3, subject: '', body: '' }])}>Add follow-up</button><button disabled={busy}>{editingCampaignId ? 'Save campaign' : 'Create campaign'}</button>{editingCampaignId && <button type="button" className="secondary" onClick={cancelCampaignEdit}>Cancel edit</button>}</div>
         </form></>}
+        <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><thead><tr><th>Campaign</th><th>ICP</th><th>Status</th><th>Mode</th><th>Goal</th><th>Control</th></tr></thead><tbody>{campaignPageData.slice.map(r => <tr key={r.id}><td>{r.name}</td><td>{r.icp?.name}</td><td>{r.status}</td><td>{r.automationMode.replaceAll('_', ' ').toLowerCase()}</td><td>{r.weeklyAppointmentGoal}/week</td><td>{canWrite ? <><button disabled={busy} onClick={() => void mutate('campaigns', 'PATCH', { id: r.id, status: r.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' })}>{r.status === 'ACTIVE' ? 'Pause' : 'Activate'}</button><button type="button" className="secondary" disabled={busy} onClick={() => beginEditCampaign(r)}>Edit</button></> : <span className="muted">View only</span>}<CampaignHistory id={r.id} name={r.name} onChanged={() => void load()}/></td></tr>)}</tbody></table></div>
+        <Pager page={campaignPageData.page} pages={campaignPageData.pages} total={campaignPageData.total} label="campaigns" onPage={setCampaignPage}/>
       </>}
       {section === 'settings' && settings && <form key={String(settings.automationEnabled) + settings.postalAddress + settings.companyName} className="editor" onSubmit={submit} aria-labelledby="workspace-settings-title"><h2 id="workspace-settings-title">Workspace sending and integrations</h2><p>Gateway: {settings.gatewayConfigured ? 'Configured' : 'Not connected'}. Webhooks: {settings.webhookConfigured ? 'Configured' : 'Not connected'}. Calendly: {settings.calendlyConfigured ? 'Signing key set' : 'Not connected'}{settings.calendlyReconcileConfigured ? `, missed-booking recovery on${settings.calendlyReconciledAt ? ` (last run ${new Date(settings.calendlyReconciledAt).toLocaleString()})` : ''}` : ''}. Sending: {settings.outboundEnabled ? 'Enabled by operator' : 'Disabled by operator'}.</p><label><input type="checkbox" name="automationEnabled" defaultChecked={settings.automationEnabled} disabled={!isAdmin}/> Enable tenant automation</label><div className="formGrid"><Field name="companyName" label="Company / workspace name" initial={settings.companyName ?? ''} minLength={2} hint="Shown to your team and on legal pages"/><Field name="dailySendCap" label="Tenant daily email cap" type="number" initial={settings.dailySendCap} min={1} hint="At least 1"/><Field name="weeklyProspectCap" label="Tenant weekly prospect cap" type="number" initial={settings.weeklyProspectCap} min={1}/><Field name="postalAddress" label="Business postal address" initial={settings.postalAddress} minLength={10} hint="Full street address, at least 10 characters"/><Field name="gatewayKey" label="Replace gateway credential" type="password" required={false}/><Field name="webhookSecret" label="Replace webhook signing secret" type="password" required={false}/><Field name="calendlySigningKey" label="Replace Calendly webhook signing key" type="password" required={false}/><Field name="calendlyToken" label="Calendly access token for missed-booking recovery (read-only use)" type="password" required={false}/><Field name="calendlyOrganizationUri" label="Calendly organization URI (https://api.calendly.com/organizations/...)" initial={settings.calendlyOrganizationUri ?? ''} required={false}/><Field name="monthlySpendCap" label="Monthly provider spend cap in USD (blank = no cap)" type="number" step="0.01" initial={settings.monthlySpendCapCents === null || settings.monthlySpendCapCents === undefined ? '' : settings.monthlySpendCapCents / 100} required={false}/><Field name="providerCost" label="Cost per discovered prospect in USD" type="number" step="0.01" initial={(settings.providerCostCents ?? 0) / 100} required={false}/><Field name="messageRetentionDays" label="Redact message text and replies after N days (30 or more; blank = keep)" type="number" initial={settings.messageRetentionDays ?? ''} required={false} min={30}/></div><p className="muted">Spend caps only limit what the discovery step buys; they need a cost per prospect above zero to take effect.</p>{isAdmin ? <button disabled={busy}>Save settings</button> : <p className="muted">Only a workspace administrator can save these settings.</p>}</form>}
       {section === 'leads' && <><p className="muted">Prospects appear after a running campaign discovers them, or when someone on the workspace adds or imports them for review.</p>

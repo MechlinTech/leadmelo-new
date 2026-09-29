@@ -9,5 +9,5 @@ export const POST = endpoint(async req => {
   const user = await authenticate(req, true);
   if (!['TENANT_ADMIN', 'SUPER_ADMIN'].includes(user.role)) throw new HttpError(403, 'admin_required');
   const { email } = z.object({ email: z.string().trim().email().max(254), confirm: z.literal(true) }).strict().parse(await jsonBody(req, 2048));
-  return Response.json({ erased: await eraseSubject(user.tenantId, user.id, email) });
+  return Response.json({ erased: await eraseSubject(user.tenantId, user.id, email, true) });
 });

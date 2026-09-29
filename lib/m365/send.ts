@@ -4,6 +4,23 @@ import { GraphClient, MailInput, mailboxPath, mimeMessage } from './graph';
 
 // Every state transition is committed BEFORE a remote side effect. An uncertain send
 // can be read/reconciled but never automatically submitted a second time.
+// One workspace notice from the first connected mailbox. Returns false when Microsoft is not connected.
+export async function sendWorkspaceNotice(tenantId: string, to: string, subject: string, text: string) {
+  const config = await db.m365Connection.findUnique({ where: { tenantId } });
+  const from = config?.enabled ? config.mailboxes[0] : undefined;
+  if (!from || /[\r\n]/.test(to) || /[\r\n]/.test(subject)) return false;
+  const graph = new GraphClient(config!);
+  await graph.request(`${mailboxPath(from)}/sendMail`, 'POST', JSON.stringify({
+    message: {
+      subject,
+      body: { contentType: 'Text', content: text },
+      toRecipients: [{ emailAddress: { address: to } }]
+    },
+    saveToSentItems: true
+  }));
+  return true;
+}
+
 export async function sendMicrosoft(tenantId: string, key: string, input: MailInput, client?: GraphClient) {
   const config = await db.m365Connection.findUnique({where:{tenantId}});
   if (!config?.enabled || input.tenantId !== tenantId || !config.mailboxes.includes(input.from)) throw new Error('m365_sender_not_allowed');

@@ -4,7 +4,7 @@ import { decrypt } from '../crypto';
 import { HttpError } from '../http';
 import { TEMPLATE_VARIABLES, icpInput } from '../validation';
 import { classifyReplyDetailed, type ReplyIntentName } from '../replies';
-import { chat, extractJson, checkAiUrl, type AiConfig, type ChatMessage } from './client';
+import { chat, extractJson, checkAiUrl, explainAiSetup, type AiConfig, type ChatMessage } from './client';
 
 export const AI_FEATURES = ['campaign_assist', 'reply_assist'] as const;
 export type AiFeature = typeof AI_FEATURES[number];
@@ -20,7 +20,10 @@ export async function loadAiConfig(tenantId: string, feature: AiFeature): Promis
   if (!s.aiFeatures.includes(feature)) throw new HttpError(409, 'ai_feature_off');
   const bad = checkAiUrl(s.aiBaseUrl);
   if (bad) throw new HttpError(409, `ai_url_rejected: ${bad}`);
-  return { baseUrl: s.aiBaseUrl, model: s.aiModel, apiKey: s.aiKey ? decrypt(s.aiKey) : undefined };
+  const apiKey = s.aiKey ? decrypt(s.aiKey).trim() : undefined;
+  const setup = explainAiSetup(s.aiBaseUrl, s.aiModel, apiKey);
+  if (setup) throw new HttpError(409, setup);
+  return { baseUrl: s.aiBaseUrl, model: s.aiModel, apiKey };
 }
 
 export async function chargeAiCall(tenantId: string, userId: string, feature: string) {

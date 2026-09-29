@@ -9,7 +9,10 @@ export default function PrivacyTools() {
     const email = String(new FormData(e.currentTarget).get('email') ?? '');
     try {
       if (kind === 'export') { const data = await api('privacy/export', 'POST', { email }); setResult(JSON.stringify(data, null, 2)); setNotice(data.found ? 'Personal data held for this address is shown below.' : 'Nothing is held for this address.'); }
-      else { const r = await api('privacy/erase', 'POST', { email, confirm: true }); setNotice(`Erased. Contact ${r.erased.contact}, replies ${r.erased.replies}, messages ${r.erased.messages}. The address is permanently suppressed.`); }
+      else {
+        const r = await api('privacy/erase', 'POST', { email, confirm: true });
+        setNotice(r.erased?.found ? `Erased. Contact ${r.erased.contact}, replies ${r.erased.replies}, messages ${r.erased.messages}. The address is permanently suppressed.` : 'No matching workspace records were found for this address. Nothing was erased.');
+      }
     } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
   }
   return <section aria-labelledby="privacy-title">

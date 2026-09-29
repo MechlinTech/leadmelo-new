@@ -1,6 +1,7 @@
 'use client';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { userError } from '../lib/userErrors';
 
 type Invite = { id: string; email: string; role: string; expiresAt: string };
 export default function SecuritySettings() {
@@ -11,8 +12,8 @@ export default function SecuritySettings() {
   useEffect(() => { void loadInvites(); }, [loadInvites]);
   async function run(fn: () => Promise<void>) { setBusy(true); setError(''); setNotice(''); try { await fn(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
   const invite = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const form = e.currentTarget; const data = new FormData(form); return run(async () => {
-    const r = await api<{ acceptUrl: string }>('invites', 'POST', { email: data.get('email'), role: data.get('role') });
-    setLink(r.acceptUrl); setNotice('Invitation created. Copy the link below and send it to the person; it is shown only once.'); form.reset(); await loadInvites();
+    const r = await api<{ acceptUrl: string; emailed?: boolean; emailError?: string }>('invites', 'POST', { email: data.get('email'), role: data.get('role') });
+    setLink(r.emailed ? '' : r.acceptUrl); setNotice(r.emailed ? 'Invitation email sent. It includes the link to join this workspace.' : `${userError(r.emailError)} Copy the link below and send it to the person; it is shown only once.`); form.reset(); await loadInvites();
   }); };
   const enable = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const data = new FormData(e.currentTarget); return run(async () => {
     setCodes((await api<{ recoveryCodes: string[] }>('auth/mfa/enable', 'POST', { code: String(data.get('code')) })).recoveryCodes); setMfa(null);

@@ -80,12 +80,26 @@ export async function rollbackCampaign(tenantId: string, campaignId: string, toV
   return updateCampaign(tenantId, campaignId, actorUserId, { ...snap.fields, sequenceSteps: snap.sequenceSteps }, `rollback_to_${toVersion}`);
 }
 
+const COPY_SUFFIX = /(?: \(copy(?: \d+)?\))+$/;
+async function nextCloneName(tenantId: string, sourceName: string) {
+  const root = sourceName.replace(COPY_SUFFIX, '').trim() || sourceName;
+  const rows = await db.campaign.findMany({ where: { tenantId, name: { startsWith: root } }, select: { name: true }, take: 500 });
+  const taken = new Set(rows.map(r => r.name));
+  const first = `${root} (copy)`;
+  if (!taken.has(first)) return first;
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${root} (copy ${n})`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${root} (copy ${Date.now()})`;
+}
+
 // A clone is always a draft: no enrollments, no approvals, must pass the readiness gate.
 export async function cloneCampaign(tenantId: string, campaignId: string, actorUserId: string | null, name?: string) {
   const src = await db.campaign.findFirst({ where: { id: campaignId, tenantId }, include: { sequenceSteps: true } });
   if (!src) throw new HttpError(404, 'campaign_not_found');
   const snap = snapshotOf(src);
-  const copyName = (name ?? `${src.name} (copy)`).slice(0, 200);
+  const copyName = (name ?? await nextCloneName(tenantId, src.name)).slice(0, 200);
   const copy = await db.campaign.create({ data: { ...(snap.fields as Prisma.CampaignUncheckedCreateInput), tenantId, name: copyName, status: 'DRAFT', version: 1, sequenceSteps: { create: snap.sequenceSteps } }, include: { sequenceSteps: true } });
   await db.auditEvent.create({ data: { tenantId, actorUserId, action: 'campaign_cloned', entityId: copy.id, metadata: { from: campaignId } } });
   return copy;

@@ -10,11 +10,13 @@ export default function AccountLink({ mode, token }: { mode: 'accept' | 'reset';
     const form = new FormData(e.currentTarget);
     const password = String(form.get('password') ?? '');
     if (password !== String(form.get('confirm') ?? '')) { setError('The two passwords do not match.'); return; }
+    if (!/\S/.test(password)) { setError('Password cannot contain only blank spaces. Please enter a valid password.'); return; }
+    if (password.trim().length < 12) { setError('Use at least 12 characters, not counting blank spaces.'); return; }
     setBusy(true);
     try {
       await api(mode === 'accept' ? 'invites/accept' : 'auth/reset', 'POST', mode === 'accept' ? { token, password, name: String(form.get('name') ?? '') || undefined } : { token, password });
       setDone(true);
-    } catch (err) { setError(mode === 'accept' ? 'This invitation is invalid, expired or already used, or the password is too short.' : 'This reset link is invalid, expired or already used, or the password is too short.'); void err; }
+    } catch (err) { setError((err as Error).message || 'This link is invalid, expired, or already used.'); }
     finally { setBusy(false); }
   }
   if (!token) return <p role="alert" className="error">This link is missing its token. Ask your administrator for a new one.</p>;

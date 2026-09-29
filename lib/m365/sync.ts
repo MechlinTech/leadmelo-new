@@ -6,10 +6,20 @@ import { raiseAlert } from '../alerts';
 import { GraphClient, GraphError, mailboxPath } from './graph';
 
 // Reject untrusted next links, including links for a different mailbox.
+// Graph returns either mailFolders/inbox or mailFolders('inbox') for the same folder.
+function inboxDeltaPaths(mailbox: string) {
+  const user = decodeURIComponent(mailbox).toLowerCase();
+  return [
+    `/v1.0/users/${user}/mailfolders/inbox/messages/delta`,
+    `/v1.0/users/${user}/mailfolders('inbox')/messages/delta`,
+    `/v1.0/users('${user}')/mailfolders/inbox/messages/delta`,
+    `/v1.0/users('${user}')/mailfolders('inbox')/messages/delta`
+  ];
+}
 export function validateDeltaLink(link: string, mailbox: string) {
   const url = new URL(link);
-  const expected = `${mailboxPath(mailbox)}/mailFolders/inbox/messages/delta`;
-  if (url.origin !== 'https://graph.microsoft.com' || decodeURIComponent(url.pathname).toLowerCase() !== decodeURIComponent(expected).toLowerCase() || url.username || url.password || url.hash) throw new Error('m365_invalid_delta_link');
+  const path = decodeURIComponent(url.pathname).toLowerCase();
+  if (url.origin !== 'https://graph.microsoft.com' || url.username || url.password || url.hash || !inboxDeltaPaths(mailbox).includes(path)) throw new Error('m365_invalid_delta_link');
   return link;
 }
 // ---- delivery-failure (bounce) notices ----
