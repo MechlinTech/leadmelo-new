@@ -2,12 +2,17 @@ import type { ICP, Campaign } from '@prisma/client';
 import type { Prospect } from './providers';
 
 const has = (values: string[], value: string) => values.some(v => v.trim().toLowerCase() === value.trim().toLowerCase());
+// The gateway stamps verifiedAt on its own clock while the run clock was taken earlier.
+// A few minutes ahead is clock skew, not a forged future verification.
+const VERIFICATION_FUTURE_SKEW_MS = 5 * 60 * 1000;
 export function qualifyProspect(icp: Pick<ICP, 'industries' | 'companySizes' | 'geographies' | 'buyerTitles' | 'buyingSignals' | 'technologies' | 'exclusionRules' | 'minScore'>, p: Prospect, now = new Date()) {
   const hasBuyer = has(icp.buyerTitles, p.title);
   const hasPainSignal = p.signals.some(v => has(icp.buyingSignals, v));
   const excluded = icp.exclusionRules.some(v => [p.domain, p.company, p.industry].some(x => x.toLowerCase() === v.toLowerCase()));
-  const verifiedAge = now.getTime() - Date.parse(p.verifiedAt);
-  const eligible = !excluded && p.verification === 'VALID' && verifiedAge >= 0 && verifiedAge <= 7 * 86400000 && hasBuyer && hasPainSignal && has(icp.industries, p.industry) && has(icp.companySizes, p.companySize) && has(icp.geographies, p.geography);
+  const verifiedAt = Date.parse(p.verifiedAt);
+  const verifiedAge = now.getTime() - verifiedAt;
+  const fresh = Number.isFinite(verifiedAt) && verifiedAge >= -VERIFICATION_FUTURE_SKEW_MS && verifiedAge <= 7 * 86400000;
+  const eligible = !excluded && p.verification === 'VALID' && fresh && hasBuyer && hasPainSignal && has(icp.industries, p.industry) && has(icp.companySizes, p.companySize) && has(icp.geographies, p.geography);
   const score = eligible ? 90 + (p.technologies.some(v => has(icp.technologies, v)) ? 10 : 0) : 0;
   return { eligible: eligible && score >= icp.minScore, score, hasBuyer, hasPainSignal };
 }
@@ -19,6 +24,33 @@ export function localDate(date: Date, timeZone: string) {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 export const isHoliday = (date: Date, timeZone: string, holidays: string[] = []) => holidays.includes(localDate(date, timeZone));
+
+// Specific wait codes replace the opaque waiting_for_send_gate so the Automation
+// queue shows which check is holding an approved message.
+export function outreachWaitReason(input: {
+  campaign: { status: string; automationMode: string; timezone: string; businessDaysOnly: boolean; sendStartHour: number; sendEndHour: number; holidays?: string[] };
+  settings: { automationEnabled: boolean; suspended: boolean; gatewayKey: string | null; postalAddress: string | null } | null;
+  health: { status: string; lastCheckedAt: Date | null } | null;
+  approvedAt: Date | null;
+  mailboxBlocked: boolean;
+  stale: boolean;
+  now?: Date;
+}): string | null {
+  const now = input.now ?? new Date();
+  const { campaign: c, settings: s, health } = input;
+  if (input.stale) return 'reverification_required';
+  if (c.automationMode === 'REVIEW_BEFORE_SEND' && !input.approvedAt) return 'awaiting_approval';
+  if (!withinSendWindow(c, now)) return 'outside_send_window';
+  if (input.mailboxBlocked) return 'mailbox_sync_unhealthy';
+  if (c.status !== 'ACTIVE') return 'campaign_not_active';
+  if (c.automationMode === 'PAUSED') return 'campaign_paused';
+  if (!s?.automationEnabled) return 'tenant_automation_off';
+  if (s.suspended) return 'tenant_suspended';
+  if (!s.gatewayKey) return 'gateway_not_configured';
+  if (!s.postalAddress) return 'postal_address_missing';
+  if (!health || health.status !== 'HEALTHY' || !health.lastCheckedAt || now.getTime() - health.lastCheckedAt.getTime() > 86400000) return 'sender_health_not_ready';
+  return null;
+}
 
 export function withinSendWindow(c: Pick<Campaign, 'timezone' | 'businessDaysOnly' | 'sendStartHour' | 'sendEndHour'> & { holidays?: string[] }, now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: c.timezone, weekday: 'short', hour: 'numeric', hourCycle: 'h23' }).formatToParts(now);

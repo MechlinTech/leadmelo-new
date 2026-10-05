@@ -14,6 +14,8 @@ The gateway belongs to the deployment operator. `PROVIDER_GATEWAY_URL` is an ope
 
 Return only known information, source evidence and independently verified email status. The example is synthetic. Normalize values to the selected ICP taxonomy; never change a prospect's actual attributes to force a match. Invalid/risky/unknown, stale, excluded and mismatched prospects do not enter sequences. Natural-language exclusions require explicit implementation beyond the current exact-match filter. Evidence freshness and provenance validation remain a provider responsibility.
 
+For local/dev testing without Apollo credits, the reference gateway supports `GATEWAY_DUMMY_DISCOVERY=true` with `GATEWAY_DUMMY_EMAILS` (comma-separated). Each email becomes one ICP-aligned `VALID` prospect; Apollo and Hunter are not called. See `gateway/README.md`.
+
 ## Reverification
 
 `POST {gateway}/verify` receives `{tenantId,contactId,email}` with tenant authorization and a stable idempotency key per reverification request. Return `{"email":"buyer@example.com","verification":"VALID","verifiedAt":"2026-09-18T15:00:00Z"}`. Status is VALID, INVALID, RISKY or UNKNOWN. Evidence must match the email and be no more than one hour old, with no future timestamp. UNKNOWN and transport failures retry up to three attempts, then raise `verification_exhausted`. INVALID/RISKY suppress the contact and cancel queued outreach. Do not cache UNKNOWN forever under the idempotency key: permit retrieval of the completed verification result without repurchasing the operation.

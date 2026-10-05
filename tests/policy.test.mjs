@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { classifyReply } from '../lib/replies.ts';
-import { qualifyProspect, withinSendWindow, addBusinessDays, renderTemplate } from '../lib/policy.ts';
+import { qualifyProspect, withinSendWindow, addBusinessDays, renderTemplate, outreachWaitReason } from '../lib/policy.ts';
 import { verifyWebhook } from '../lib/webhooks.ts';
 import { encrypt, decrypt, hashPassword, verifyPassword } from '../lib/crypto.ts';
 import { unsubscribeToken, parseUnsubscribe } from '../lib/unsubscribe.ts';
@@ -49,7 +49,19 @@ test('generic ICP qualification requires fresh verified buyer, evidence and exac
   const now = new Date('2026-09-18T17:00:00Z');
   const p = { domain: 'buyer.example', company: 'Buyer', industry: 'SaaS', companySize: '50-1000', geography: 'US', title: 'CTO', signals: ['Hiring QA'], technologies: ['Playwright'], verification: 'VALID', verifiedAt: now.toISOString() };
   assert.equal(qualifyProspect(icp, p, now).score, 100);
-  for (const change of [{ signals: [] }, { verification: 'RISKY' }, { title: 'Student' }, { geography: 'Elsewhere' }, { domain: 'competitor.example' }, { verifiedAt: '2025-01-01T00:00:00Z' }, { verifiedAt: '2027-01-01T00:00:00Z' }]) assert.equal(qualifyProspect(icp, { ...p, ...change }, now).eligible, false);
+  assert.equal(qualifyProspect(icp, { ...p, verifiedAt: new Date(now.getTime() + 30_000).toISOString() }, now).eligible, true, 'a few seconds of gateway clock skew still qualifies');
+  for (const change of [{ signals: [] }, { verification: 'RISKY' }, { title: 'Student' }, { geography: 'Elsewhere' }, { domain: 'competitor.example' }, { verifiedAt: '2025-01-01T00:00:00Z' }, { verifiedAt: '2027-01-01T00:00:00Z' }, { verifiedAt: new Date(now.getTime() + 10 * 60_000).toISOString() }]) assert.equal(qualifyProspect(icp, { ...p, ...change }, now).eligible, false);
+});
+test('outreach wait reason names the send window before other readiness gates', () => {
+  const campaign = { status: 'ACTIVE', automationMode: 'REVIEW_BEFORE_SEND', timezone: 'America/Los_Angeles', businessDaysOnly: true, sendStartHour: 9, sendEndHour: 17 };
+  const settings = { automationEnabled: true, suspended: false, gatewayKey: 'k', postalAddress: '123 Test Street' };
+  const health = { status: 'HEALTHY', lastCheckedAt: new Date('2026-10-01T15:00:00Z') };
+  const beforeWindow = new Date('2026-10-01T15:28:00Z'); // 08:28 LA
+  assert.equal(outreachWaitReason({ campaign, settings, health, approvedAt: beforeWindow, mailboxBlocked: false, stale: false, now: beforeWindow }), 'outside_send_window');
+  assert.equal(outreachWaitReason({ campaign, settings, health, approvedAt: null, mailboxBlocked: false, stale: false, now: beforeWindow }), 'awaiting_approval');
+  const inWindow = new Date('2026-10-01T17:00:00Z'); // 10:00 LA
+  assert.equal(outreachWaitReason({ campaign, settings, health, approvedAt: inWindow, mailboxBlocked: false, stale: false, now: inWindow }), null);
+  assert.equal(outreachWaitReason({ campaign, settings, health, approvedAt: inWindow, mailboxBlocked: true, stale: false, now: inWindow }), 'mailbox_sync_unhealthy');
 });
 test('template rendering rejects undefined variables', () => {
   assert.equal(renderTemplate('Hi {{firstName}}', { firstName: 'Alex' }), 'Hi Alex');

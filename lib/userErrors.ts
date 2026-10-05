@@ -36,7 +36,19 @@ const MESSAGES: Record<string, string> = {
   ai_model_is_email: 'The model name is an email address. For OpenAI, choose the OpenAI preset and use a model such as gpt-4o-mini.',
   ai_key_required: 'Paste the API key from your AI provider, then save before testing.',
   ai_openai_key_invalid: 'That key is too short to be an OpenAI key. Paste the full key from platform.openai.com (it starts with sk-).',
-  m365_not_connected: 'Microsoft 365 is not connected, so the invitation email was not sent.'
+  m365_not_connected: 'Microsoft 365 is not connected, so the invitation email was not sent.',
+  waiting_for_send_gate: 'This message is waiting on a send check (approval, send hours, mailbox sync, or sender health).',
+  outside_send_window: 'Approved, but outside this campaign’s send hours in its timezone. It will send when the window opens.',
+  awaiting_approval: 'This message is waiting for Approve send on the Automation page.',
+  mailbox_sync_unhealthy: 'The Microsoft 365 mailbox sync for this sender is not healthy. Check Settings → Microsoft 365.',
+  sender_health_not_ready: 'Sender health is missing, not HEALTHY, or older than 24 hours.',
+  campaign_not_active: 'The campaign is not active.',
+  campaign_paused: 'The campaign automation mode is paused.',
+  tenant_automation_off: 'Tenant automation is off in Settings.',
+  tenant_suspended: 'This tenant is suspended.',
+  gateway_not_configured: 'The provider gateway credential is not configured.',
+  postal_address_missing: 'The business postal address is missing in Settings.',
+  reverification_required: 'The contact’s email verification is missing or older than 7 days.'
 };
 
 const READY: Record<string, string> = {

@@ -35,9 +35,14 @@ export const POST = endpoint(async req => {
 export const PATCH = endpoint(async req => {
   const user = await authenticate(req, true);
   const body = z.object({ id: z.string(), status: z.enum(['ACTIVE', 'PAUSED', 'COMPLETE']) }).strict().parse(await jsonBody(req));
+  const existing = await db.campaign.findFirst({ where: { id: body.id, tenantId: user.tenantId } });
+  if (!existing) throw new HttpError(404, 'campaign_not_found');
   if (body.status === 'ACTIVE') { await campaignReady(user.tenantId, body.id); await assertCanActivateCampaign(user.tenantId, body.id); }
-  const result = await db.campaign.updateMany({ where: { id: body.id, tenantId: user.tenantId }, data: { status: body.status, nextRunAt: new Date() } });
-  if (!result.count) throw new HttpError(404, 'campaign_not_found');
+  // Only newly activating a campaign should wake the scheduler. Pause/complete must not
+  // rewrite nextRunAt, and Activate while already ACTIVE must not enqueue another run.
+  const data: { status: typeof body.status; nextRunAt?: Date } = { status: body.status };
+  if (body.status === 'ACTIVE' && existing.status !== 'ACTIVE') data.nextRunAt = new Date();
+  await db.campaign.update({ where: { id: existing.id }, data });
   await db.auditEvent.create({ data: { tenantId: user.tenantId, actorUserId: user.id, action: 'campaign_status_changed', entityId: body.id, metadata: { status: body.status } } });
   return Response.json({ ok: true });
 });

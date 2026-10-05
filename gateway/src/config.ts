@@ -16,8 +16,24 @@ export type GatewayConfig = {
   tenants: Map<string, TenantBinding>; taxonomy: { industries: Record<string, string>; titles: Record<string, string> };
   syncWaitMs: number; discoveryDeadlineMs: number; maxEnrichPerRequest: number; maxPages: number; storeFile?: string;
   apolloBase?: string; hunterBase?: string;
+  // Dev/test only: when true, POST /discover returns synthetic prospects from GATEWAY_DUMMY_EMAILS and never calls Apollo.
+  dummyDiscovery: boolean;
+  dummyEmails: string[];
 };
 const lowerKeys = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v]));
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export function parseDummyEmails(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const part of raw.split(/[\s,;]+/)) {
+    const email = part.trim().toLowerCase();
+    if (!email || !EMAIL.test(email) || seen.has(email)) continue;
+    seen.add(email);
+    out.push(email);
+  }
+  return out;
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig {
   if (!env.GATEWAY_TENANTS_FILE) throw new Error('GATEWAY_TENANTS_FILE is required');
@@ -28,11 +44,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
   }
   const tax = env.GATEWAY_TAXONOMY_FILE ? taxonomyFile.parse(JSON.parse(readFileSync(env.GATEWAY_TAXONOMY_FILE, 'utf8'))) : { industries: {}, titles: {} };
   const num = (v: string | undefined, d: number, min: number, max: number) => Math.min(max, Math.max(min, Number(v ?? d) || d));
+  const dummyDiscovery = /^(1|true|yes|on)$/i.test(String(env.GATEWAY_DUMMY_DISCOVERY ?? '').trim());
+  const dummyEmails = parseDummyEmails(env.GATEWAY_DUMMY_EMAILS);
+  if (dummyDiscovery && dummyEmails.length === 0) throw new Error('GATEWAY_DUMMY_DISCOVERY requires GATEWAY_DUMMY_EMAILS with at least one email');
   return {
     tenants, taxonomy: { industries: lowerKeys(tax.industries), titles: lowerKeys(tax.titles) },
     syncWaitMs: num(env.GATEWAY_SYNC_WAIT_MS, 12000, 1000, 14000), // LeadMelo aborts a gateway call after 15 s
     discoveryDeadlineMs: num(env.GATEWAY_DISCOVERY_DEADLINE_MS, 90000, 5000, 600000),
     maxEnrichPerRequest: num(env.GATEWAY_MAX_ENRICH_PER_REQUEST, 60, 1, 500), maxPages: num(env.GATEWAY_MAX_PAGES, 3, 1, 10),
-    storeFile: env.GATEWAY_STORE_FILE
+    storeFile: env.GATEWAY_STORE_FILE,
+    dummyDiscovery, dummyEmails
   };
 }

@@ -85,6 +85,8 @@ services:
       GATEWAY_TENANTS_FILE: /etc/leadmelo-gateway/tenants.json
       GATEWAY_TAXONOMY_FILE: /etc/leadmelo-gateway/taxonomy.json
       GATEWAY_STORE_FILE: /var/lib/leadmelo-gateway/store.jsonl
+      GATEWAY_DUMMY_DISCOVERY: ${GATEWAY_DUMMY_DISCOVERY:-false}
+      GATEWAY_DUMMY_EMAILS: ${GATEWAY_DUMMY_EMAILS:-}
     ports: ["127.0.0.1:8788:8788"]
     volumes:
       - ${GATEWAY_CONFIG_DIR:-./gateway-config}:/etc/leadmelo-gateway:ro

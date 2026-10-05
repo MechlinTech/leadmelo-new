@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { db } from './db';
 import { gateway, discoveredSchema, sentSchema } from './providers';
-import { qualifyProspect, withinSendWindow, addBusinessDays, renderTemplate } from './policy';
+import { qualifyProspect, withinSendWindow, addBusinessDays, renderTemplate, outreachWaitReason } from './policy';
 import { unsubscribeToken } from './unsubscribe';
 import { sendMicrosoft } from './m365/send';
 import { MailInput } from './m365/graph';
@@ -25,7 +25,9 @@ export async function scheduleRuns(now = new Date()) {
       const claimed = await tx.campaign.updateMany({ where: { id: c.id, nextRunAt: c.nextRunAt, status: 'ACTIVE' }, data: { nextRunAt: new Date(now.getTime() + 3600000) } });
       if (!claimed.count) return;
       const pending = await tx.automationRun.count({ where: { campaignId: c.id, status: { in: ['RUNNING', 'QUEUED'] } } });
-      if (!pending) await tx.automationRun.create({ data: { tenantId: c.tenantId, campaignId: c.id, idempotencyKey: `scheduled:${c.id}:${c.nextRunAt.toISOString()}` } });
+      // Debounce double-activate / overlapping ticks: at most one new run per campaign per minute.
+      const recent = await tx.automationRun.findFirst({ where: { campaignId: c.id, createdAt: { gte: new Date(now.getTime() - 60_000) } }, select: { id: true } });
+      if (!pending && !recent) await tx.automationRun.create({ data: { tenantId: c.tenantId, campaignId: c.id, idempotencyKey: `scheduled:${c.id}:${c.nextRunAt.toISOString()}` } });
     });
   }
 }
@@ -60,7 +62,7 @@ export async function processRun(now = new Date()) {
     if (allowed) await settleProviderSpend(c.tenantId, `discover:${run.idempotencyKey}`, result.prospects.length);
     let enrolled = 0;
     for (const p of result.prospects) {
-      const q = qualifyProspect(c.icp, p, now);
+      const q = qualifyProspect(c.icp, p, new Date());
       if (!q.eligible || q.score < c.minScore) continue;
       const added = await db.$transaction(async tx => {
         await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id=${c.tenantId} FOR UPDATE`;
@@ -121,11 +123,11 @@ export async function processOutreach(now = new Date()) {
       const microsoft = await tx.m365Connection.findUnique({where:{tenantId:e.tenantId}});
       const cursor = microsoft ? await tx.mailCursor.findUnique({where:{tenantId_mailbox:{tenantId:e.tenantId,mailbox:c.senderEmail}}}) : null;
       const mailboxBlocked = !!microsoft && (!microsoft.enabled || !microsoft.mailboxes.includes(c.senderEmail) || !!cursor?.error || !cursor?.lastSuccessAt || now.getTime()-cursor.lastSuccessAt.getTime()>300000);
-      const paused = mailboxBlocked || c.status !== 'ACTIVE' || c.automationMode === 'PAUSED' || !s?.automationEnabled || s.suspended || !s.gatewayKey || !s.postalAddress || !health || health.status !== 'HEALTHY' || !health.lastCheckedAt || now.getTime() - health.lastCheckedAt.getTime() > 86400000 || (c.automationMode === 'REVIEW_BEFORE_SEND' && !e.approvedAt);
       const stale = contact.verification !== 'VALID' || !contact.lastVerifiedAt || now.getTime() - contact.lastVerifiedAt.getTime() > 7 * 86400000;
-      if (paused || stale || !withinSendWindow(c, now)) {
+      const wait = outreachWaitReason({ campaign: c, settings: s, health, approvedAt: e.approvedAt, mailboxBlocked, stale, now });
+      if (wait) {
         if (stale && !contact.reverifyRequestedAt) await tx.contact.update({where:{id:contact.id},data:{reverifyRequestedAt:now,verificationAttempts:0,verificationNextAt:now}});
-        await tx.outreachEvent.update({ where: { id: e.id }, data: { scheduledAt: new Date(now.getTime() + 900000), error: stale ? 'reverification_required' : 'waiting_for_send_gate' } });
+        await tx.outreachEvent.update({ where: { id: e.id }, data: { scheduledAt: new Date(now.getTime() + 900000), error: wait } });
         return false;
       }
       const day = new Date(now.getTime() - 86400000);

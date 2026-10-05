@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ApolloClient } from './apollo';
 import { HunterClient } from './hunter';
 import { discover } from './discover';
+import { discoverDummy } from './dummyDiscover';
 import { GatewayHttpError, VendorError } from './errors';
 import { GatewayStore } from './store';
 import type { GatewayConfig, TenantBinding } from './config';
@@ -48,12 +49,17 @@ export function createGatewayServer(config: GatewayConfig, deps: { fetcher?: typ
     if (path === '/discover') {
       const body = discoverReq.parse(raw);
       if (body.tenantId !== binding.tenantId) throw new GatewayHttpError(403, 'tenant_mismatch');
-      if (!binding.apolloKey) throw new GatewayHttpError(409, 'vendor_not_configured: discovery needs an Apollo key');
       const icp = { industries: body.icp.industries, companySizes: body.icp.companySizes, geographies: body.icp.geographies, technologies: body.icp.technologies, buyingSignals: body.icp.buyingSignals, buyerTitles: body.icp.buyerTitles, exclusionRules: body.icp.exclusionRules };
-      const requestHash = sha256(JSON.stringify({ c: body.campaignId, icp, l: body.limit }));
-      const apollo = new ApolloClient(fetcher, binding.apolloKey, config.apolloBase);
-      const hunter = binding.hunterKey ? new HunterClient(fetcher, binding.hunterKey, config.hunterBase) : null;
-      job = store.run(key, requestHash, () => discover({ apollo, hunter, store, config, now: deps.now }, { tenantId: body.tenantId, campaignId: body.campaignId, icp, limit: body.limit }));
+      const requestHash = sha256(JSON.stringify({ c: body.campaignId, icp, l: body.limit, dummy: config.dummyDiscovery }));
+      if (config.dummyDiscovery) {
+        log('dummy_discover', { tenant: binding.tenantId, emails: config.dummyEmails.length });
+        job = store.run(key, requestHash, async () => discoverDummy({ store, emails: config.dummyEmails, now: deps.now }, { tenantId: body.tenantId, campaignId: body.campaignId, icp, limit: body.limit }));
+      } else {
+        if (!binding.apolloKey) throw new GatewayHttpError(409, 'vendor_not_configured: discovery needs an Apollo key');
+        const apollo = new ApolloClient(fetcher, binding.apolloKey, config.apolloBase);
+        const hunter = binding.hunterKey ? new HunterClient(fetcher, binding.hunterKey, config.hunterBase) : null;
+        job = store.run(key, requestHash, () => discover({ apollo, hunter, store, config, now: deps.now }, { tenantId: body.tenantId, campaignId: body.campaignId, icp, limit: body.limit }));
+      }
     } else {
       const body = verifyReq.parse(raw);
       if (body.tenantId !== binding.tenantId) throw new GatewayHttpError(403, 'tenant_mismatch');

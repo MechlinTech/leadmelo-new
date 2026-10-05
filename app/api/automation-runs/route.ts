@@ -5,7 +5,7 @@ import { endpoint, HttpError, jsonBody } from '../../../lib/http';
 import { campaignReady } from '../../../lib/campaigns';
 export const GET = endpoint(async req => {
   const user = await authenticate(req);
-  return Response.json(await db.automationRun.findMany({ where: { tenantId: user.tenantId }, orderBy: { createdAt: 'desc' }, take: 100 }));
+  return Response.json(await db.automationRun.findMany({ where: { tenantId: user.tenantId }, include: { campaign: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }));
 });
 export const POST = endpoint(async req => {
   const user = await authenticate(req, true);

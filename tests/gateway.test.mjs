@@ -115,7 +115,7 @@ function vendors(opts = {}) {
 async function start(fetcher, overrides = {}) {
   const config = {
     tenants: new Map([[sha(BEARER), { tenantId: 't1', apolloKey: 'apollo-key-123', hunterKey: 'hunter-key-123' }], [sha(OTHER_BEARER), { tenantId: 't2', apolloKey: 'apollo-key-456' }], [sha(NO_APOLLO), { tenantId: 't3' }]]),
-    taxonomy: { industries: { 'computer software': 'SaaS' }, titles: {} }, syncWaitMs: 5000, discoveryDeadlineMs: 30000, maxEnrichPerRequest: 60, maxPages: 3, ...overrides
+    taxonomy: { industries: { 'computer software': 'SaaS' }, titles: {} }, syncWaitMs: 5000, discoveryDeadlineMs: 30000, maxEnrichPerRequest: 60, maxPages: 3, dummyDiscovery: false, dummyEmails: [], ...overrides
   };
   const server = createGatewayServer(config, { fetcher, store: new GatewayStore() });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -251,5 +251,29 @@ test('verification: definitive answers are remembered, UNKNOWN stays retryable, 
     assert.equal(v.count('api.hunter.io'), 3, 'UNKNOWN was re-checked, not frozen');
     await assert.rejects(verify('verify-key-0003', { tenantId: 't2', contactId: 'ct3', email: 'a@b.example' }), /gateway_http_403/);
     await assert.rejects(verify('verify-key-0004', { tenantId: 't2', contactId: 'ct3', email: 'a@b.example' }, OTHER_BEARER), /gateway_http_409/);
+  } finally { await g.stop(); }
+});
+
+test('dummy discovery returns configured emails without calling Apollo and still ICP-qualifies', async () => {
+  const v = vendors();
+  const g = await start(v.fetcher, {
+    dummyDiscovery: true,
+    dummyEmails: ['alice.tester@buyer1.example', 'bob.tester@buyer2.example', 'not-an-email', 'alice.tester@buyer1.example']
+  });
+  try {
+    const r = await discover(NO_APOLLO, 'dummy-key-0001', request('t3', { limit: 10 }));
+    assert.equal(r.prospects.length, 2);
+    assert.deepEqual(r.prospects.map(p => p.email), ['alice.tester@buyer1.example', 'bob.tester@buyer2.example']);
+    assert.equal(v.count('api.apollo.io'), 0, 'Apollo is never called in dummy mode');
+    assert.equal(v.count('api.hunter.io'), 0, 'Hunter is never called in dummy mode');
+    for (const p of r.prospects) {
+      assert.equal(p.verification, 'VALID');
+      assert.equal(p.title, 'CTO');
+      assert.equal(p.industry, 'SaaS');
+      assert.deepEqual(p.signals, ['Hiring QA']);
+      assert.equal(qualifyProspect(icp, p).eligible, true);
+    }
+    const again = await discover(NO_APOLLO, 'dummy-key-0002', request('t3', { limit: 10 }));
+    assert.deepEqual(again.prospects, [], 'already-returned dummy emails are not reused on the same campaign');
   } finally { await g.stop(); }
 });
