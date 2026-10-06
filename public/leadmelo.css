@@ -36,11 +36,12 @@ code{overflow-wrap:anywhere;background:var(--surface-2);padding:2px 5px;border-r
 .appShell .appShell{display:contents}
 .appShell .appShell>.side{display:none!important}
 .appShell .appShell>.main{padding:0;max-width:none}
-.side{padding:24px 18px;background:var(--surface);border-right:1px solid var(--line)}
-.side nav{display:grid;gap:4px;margin:28px 0}
+.side{padding:24px 18px;background:var(--surface);border-right:1px solid var(--line);position:sticky;top:0;height:100vh;height:100dvh;overflow-y:auto;display:flex;flex-direction:column}
+.sideActions{display:grid;gap:8px;margin-top:auto}
+.side nav{display:grid;gap:4px;margin:28px 0;flex:1}
 .side nav a{padding:10px 12px;color:var(--text);text-decoration:none;border-radius:8px;min-height:44px;display:flex;align-items:center}
 .side nav a:hover,.side nav a[aria-current=page]{background:var(--accent-soft)}
-.brand{display:flex;align-items:center;gap:8px;font-size:21px;font-weight:750;color:var(--text);text-decoration:none}
+.brand{display:flex;align-items:center;gap:8px;font-size:21px;font-weight:750;color:var(--text);text-decoration:none;flex-shrink:0}
 .brand img{width:32px;height:32px}
 .main{padding:32px;min-width:0;max-width:1500px;width:100%}
 .wrap{max-width:1100px;margin:auto;padding:24px}
@@ -73,9 +74,10 @@ details summary{cursor:pointer;min-height:32px}
 /* ---------- mobile app: bottom navigation ---------- */
 @media(max-width:760px){
   .appShell{grid-template-columns:1fr;padding-bottom:calc(64px + env(safe-area-inset-bottom))}
-  .side{border-right:0;border-bottom:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .side{position:static;height:auto;flex-direction:row;border-right:0;border-bottom:1px solid var(--line);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .side nav{position:fixed;left:0;right:0;bottom:0;z-index:50;margin:0;display:grid;grid-template-columns:repeat(6,1fr);gap:0;background:var(--surface);border-top:1px solid var(--line);padding:4px 4px calc(4px + env(safe-area-inset-bottom))}
   .side nav a{flex-direction:column;justify-content:center;text-align:center;font-size:12px;padding:6px 2px;min-height:52px;line-height:1.2}
+  .sideActions{display:flex;margin:0}
   .main{padding:20px 14px}
   .formGrid{grid-template-columns:1fr}
   .form{margin:24px auto}
