@@ -56,6 +56,8 @@ const MESSAGES: Record<string, string> = {
   lease_expired_after_max_attempts: 'The run timed out across maximum retry attempts. Check system health and trigger a new run.',
   max_attempts_exhausted: 'This run used all three attempts without completing. Fix the cause shown above, then use Run now to queue a fresh run.',
   send_lease_exhausted: 'Email sending timed out across maximum retry attempts.',
+  m365_send_ambiguous: 'Microsoft 365 did not confirm whether this message was created, so it was not resubmitted. Check the sender mailbox, then queue the message again.',
+  m365_send_recovered: 'A previous send attempt could not be confirmed and was safely retried.',
   send_attempts_exhausted: 'This message used all five send attempts without being accepted by the email provider. Check the reason shown, fix it, then queue the message again.',
   send_target_unavailable: 'This message was canceled because its campaign, contact or recipient is no longer available.',
   sequence_step_missing: 'This message was canceled because the email step it belonged to no longer exists in the campaign. Restore the step or queue a new message.',
@@ -90,6 +92,11 @@ export function userError(code: unknown): string {
   if (raw.startsWith('gateway_http_')) {
     const status = raw.slice('gateway_http_'.length);
     return MESSAGES[raw] ?? `Provider gateway returned HTTP ${status}. Please check gateway logs and retry.`;
+  }
+  // The provider refused the draft outright (bad request, auth, throttling, mailbox full).
+  if (raw.startsWith('m365_draft_rejected_')) {
+    const status = raw.slice('m365_draft_rejected_'.length);
+    return `Microsoft 365 refused this email (HTTP ${status}), so nothing was sent. Check the sender mailbox permissions and the campaign sender address, then queue the message again.`;
   }
   // Codes with a curated sentence always win over the underscore-stripped fallback.
   if (MESSAGES[raw]) return MESSAGES[raw];

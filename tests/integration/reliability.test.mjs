@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { db } from '../../lib/db.ts';
 import { encrypt } from '../../lib/crypto.ts';
 import { GraphClient } from '../../lib/m365/graph.ts';
@@ -77,6 +77,67 @@ test('Microsoft 365 and autonomous recovery database flows',async t=>{
    await db.mailReceipt.create({data:{tenantId:tenant.id,key:unknownKey,requestHash:(await db.mailReceipt.findUnique({where:{key}})).requestHash,mailbox:input.from,status:'SUBMITTING',draftId:'still-draft'}});
    const reader=new GraphClient(config,async(url)=>String(url).includes('login.microsoftonline.com')?Response.json({access_token:'fake'}):Response.json({isDraft:true}));
    await assert.rejects(sendMicrosoft(tenant.id,unknownKey,input,reader),/m365_send_ambiguous/);
+  });
+  await t.test('a refused draft is retryable, and an unknown one without a draft id is recovered',async()=>{
+   // Microsoft answered and refused, so no draft exists and nobody was sent anything.
+   // Recording this as AMBIGUOUS left a row with no draftId, which could never advance past
+   // the DRAFT check: one transient 503 bricked the message permanently.
+   const refusedKey=`refused:${randomUUID()}`;
+   let refusals=1,drafts=0,sends=0;
+   const flaky=new GraphClient(config,async(url,options={})=>{
+    const u=String(url);
+    if(u.includes('login.microsoftonline.com'))return Response.json({access_token:'fake'});
+    if(options.method==='POST'&&u.endsWith('/messages')){
+     if(refusals-->0)return new Response(JSON.stringify({error:{code:'serviceNotAvailable'}}),{status:503});
+     drafts++;return Response.json({id:'recovered-draft',internetMessageId:'<recovered@example.com>',conversationId:'c'});
+    }
+    if(options.method==='POST'&&u.endsWith('/send')){sends++;return new Response(null,{status:202});}
+    throw new Error(`unexpected_graph_call ${options.method} ${u}`);
+   });
+   await assert.rejects(sendMicrosoft(tenant.id,refusedKey,input,flaky),/m365_draft_rejected_503/);
+   const afterRefusal=await db.mailReceipt.findUniqueOrThrow({where:{key:refusedKey}});
+   assert.equal(afterRefusal.status,'NEW','a refusal is retryable, not an unknown outcome');
+   assert.equal(afterRefusal.draftId,null,'no draft was created');
+   const retried=await sendMicrosoft(tenant.id,refusedKey,input,flaky);
+   assert.equal(retried.messageId,'recovered-draft','the retry delivers the message');
+   assert.equal(drafts,1,'exactly one draft');
+   assert.equal(sends,1,'exactly one send');
+
+   // Throttling is also a definitive "not processed" answer: nothing was created,
+   // so the next attempt may retry without waiting for an operator.
+   const throttledKey=`throttled:${randomUUID()}`;
+   let throttled=true;
+   const rateLimited=new GraphClient(config,async(url,options={})=>{
+    const u=String(url);
+    if(u.includes('login.microsoftonline.com'))return Response.json({access_token:'fake'});
+    if(options.method==='POST'&&u.endsWith('/messages')){
+     if(throttled){throttled=false;return new Response(JSON.stringify({error:{code:'tooManyRequests'}}),{status:429});}
+     return Response.json({id:'throttled-draft',internetMessageId:'<throttled@example.com>',conversationId:'c'});
+    }
+    if(options.method==='POST'&&u.endsWith('/send'))return new Response(null,{status:202});
+    throw new Error(`unexpected_graph_call ${options.method} ${u}`);
+   });
+   await assert.rejects(sendMicrosoft(tenant.id,throttledKey,input,rateLimited),/m365_draft_rejected_429/);
+   assert.equal((await db.mailReceipt.findUniqueOrThrow({where:{key:throttledKey}})).status,'NEW','a 429 is retryable, not an unknown outcome');
+   assert.equal((await sendMicrosoft(tenant.id,throttledKey,input,rateLimited)).messageId,'throttled-draft','the retry after throttling delivers');
+   await db.mailReceipt.deleteMany({where:{key:throttledKey}});
+
+   // An uncertain outcome that recorded no draft id has nothing to reconcile, and the send
+   // step only runs once a draft id is known, so it can never have reached the recipient.
+   const orphanKey=`orphan:${randomUUID()}`;
+   await db.mailReceipt.create({data:{tenantId:tenant.id,key:orphanKey,requestHash:createHash('sha256').update(JSON.stringify(input)).digest('hex'),mailbox:input.from,status:'AMBIGUOUS',error:'draft_creation_uncertain'}});
+   const recovered=new GraphClient(config,async(url,options={})=>{
+    const u=String(url);
+    if(u.includes('login.microsoftonline.com'))return Response.json({access_token:'fake'});
+    if(options.method==='POST'&&u.endsWith('/messages'))return Response.json({id:'orphan-draft',internetMessageId:'<orphan@example.com>',conversationId:'c'});
+    if(options.method==='POST'&&u.endsWith('/send'))return new Response(null,{status:202});
+    throw new Error(`unexpected_graph_call ${options.method} ${u}`);
+   });
+   assert.equal((await sendMicrosoft(tenant.id,orphanKey,input,recovered)).messageId,'orphan-draft','an unreconcilable row recovers instead of staying stuck');
+   assert.equal((await db.mailReceipt.findUniqueOrThrow({where:{key:orphanKey}})).status,'ACCEPTED');
+   // Later cases in this suite reconcile real ACCEPTED receipts from this mailbox, so these
+   // two synthetic ones must not be left behind for the reply poller to pick up.
+   await db.mailReceipt.deleteMany({where:{key:{in:[refusedKey,orphanKey]}}});
   });
   const initial=await db.outreachEvent.create({data:{tenantId:tenant.id,campaignId:campaign.id,contactId:contact.id,leadId:lead.id,idempotencyKey:key,status:'SENT',sentAt:new Date(),stepOrder:1}});
   await t.test('mailbox delta attributes by reply headers, stops sequence, creates one booking invitation',async()=>{

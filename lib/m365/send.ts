@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { db } from '../db';
 import { nonBlankEnv } from '../security';
-import { GraphClient, MailInput, emailBodyContentType, mailInput, mailboxPath, mimeMessage } from './graph';
+import { GraphClient, GraphError, MailInput, emailBodyContentType, mailInput, mailboxPath, mimeMessage } from './graph';
 
 // Logs identify a recipient without disclosing the address.
 const hashRecipient = (email: string) => createHash('sha256').update(email.toLowerCase()).digest('hex').slice(0, 12);
@@ -55,6 +55,15 @@ export async function sendMicrosoft(tenantId: string, key: string, input: MailIn
     }
     throw new Error('m365_send_ambiguous');
   }
+  // A receipt parked in SUBMITTING/AMBIGUOUS with no draftId has nothing to reconcile: the
+  // send step only runs once a draftId is known, so this message cannot have reached anyone.
+  // Leaving it here made it permanently unsendable (the DRAFT check below could never pass).
+  // Recovering it to NEW is safe: at worst an orphaned, unsent draft is left in the sender's
+  // own mailbox, which is not a duplicate delivery to the recipient.
+  if (['SUBMITTING','AMBIGUOUS'].includes(receipt.status) && !receipt.draftId) {
+    console.error(JSON.stringify({ event: 'm365_send_recovered', key, previousStatus: receipt.status, previousError: receipt.error }));
+    receipt = await db.mailReceipt.update({where:{key},data:{status:'NEW',error:'recovered_without_draft'}});
+  }
   if (receipt.status === 'NEW') {
     const claimed = await db.mailReceipt.updateMany({where:{key,status:'NEW'},data:{status:'CREATING'}});
     if (!claimed.count) throw new Error('m365_send_in_progress');
@@ -66,7 +75,23 @@ export async function sendMicrosoft(tenantId: string, key: string, input: MailIn
       if (!message?.id) throw new Error('m365_draft_missing_id');
       console.log(JSON.stringify({ event: 'm365_draft_created', key, draftId: message.id, providerStatus: 'ok' }));
       receipt = await db.mailReceipt.update({where:{key},data:{status:'DRAFT',draftId:message.id,internetMessageId:message.internetMessageId,conversationId:message.conversationId}});
-    } catch {
+    } catch (error) {
+      // A definitive HTTP rejection means Microsoft answered and refused the request,
+      // so no draft exists and the recipient cannot have been sent anything. Recording
+      // this as AMBIGUOUS left a row with no draftId, which could never advance past
+      // the DRAFT check below: one transient 503 or one bad request bricked the message
+      // permanently. Resetting to NEW lets the next attempt create a fresh draft. Even
+      // if a 5xx did leave a draft behind on the server, only the draftId recorded here
+      // is ever sent, so the recipient still receives exactly one message.
+      // 408 is the one case that is genuinely unknown — the request may or may not have
+      // been processed — so it must be reconciled rather than resubmitted.
+      if (error instanceof GraphError && error.status !== 408) {
+        await db.mailReceipt.update({where:{key},data:{status:'NEW',error:`draft_rejected_${error.status}`}});
+        throw new Error(`m365_draft_rejected_${error.status}`);
+      }
+      // Only a timeout, a dropped connection or an unparseable response leaves it
+      // genuinely unknown whether a draft was created. Those must be reconciled,
+      // never blindly resubmitted.
       await db.mailReceipt.update({where:{key},data:{status:'AMBIGUOUS',error:'draft_creation_uncertain'}});
       throw new Error('m365_send_ambiguous');
     }
