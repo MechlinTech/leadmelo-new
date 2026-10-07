@@ -19,7 +19,9 @@ export default function OperationalAlerts() {
   const { canWrite } = useAppRole();
   const [rows, setRows] = useState<Alert[]>([]), [config, setConfig] = useState<Config | null>(null);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
-  async function loadAlerts() { setRows(await api<Alert[]>('alerts')); }
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [loadingAlerts, setLoadingAlerts] = useState(true);
+  async function loadAlerts() { setLoadingAlerts(true); try { setRows(await api<Alert[]>('alerts')); } catch (e) { setError((e as Error).message); } finally { setLoadingAlerts(false); } }
   async function loadConfig() { setConfig(await api<Config>('workspace-config')); }
   useEffect(() => { Promise.all([loadAlerts(), loadConfig()]).catch(e => setError((e as Error).message)); }, []);
   async function acknowledge(id: string) {
@@ -69,7 +71,7 @@ export default function OperationalAlerts() {
       <h2>Operational alerts</h2>
       {error && <p role="alert" className="error">{error}</p>}
       {notice && <p role="status">{notice}</p>}
-      <button type="button" onClick={() => void loadAlerts().catch(e => setError((e as Error).message))}>Refresh alerts</button>
+      <button type="button" disabled={loadingAlerts || isRefreshing || busy} onClick={() => { setIsRefreshing(true); window.location.reload(); }}>{isRefreshing ? <span className="spinner" aria-hidden="true" /> : null} Refresh alerts</button>
       {canWrite && <div className="toolbar" style={{ marginTop: 8 }}>{TESTS.map(([code, label]) => <button key={code} type="button" className="secondary" disabled={busy} onClick={() => void simulate(code)}>{label}</button>)}</div>}
       <ul className="recordList">{rows.map(r => <li key={r.id}><strong>{(LABELS[r.code] ?? r.code).replaceAll('_', ' ')}</strong><p>Reference: {r.entityId}</p><p>{new Date(r.createdAt).toLocaleString()} — {r.deliveredAt ? 'Notification accepted by alert receiver' : r.attempts >= 6 ? 'Notification retries exhausted' : 'Notification pending or receiver not configured'}</p>{canWrite && <button type="button" onClick={() => void acknowledge(r.id)}>Acknowledge</button>}</li>)}</ul>
       {!rows.length && <p>No unacknowledged alerts in the latest 100 records.</p>}
