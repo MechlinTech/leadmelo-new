@@ -6,6 +6,9 @@ x-app: &app
     APP_URL: ${APP_URL:?set APP_URL}
     SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
     DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?set DATA_ENCRYPTION_KEY}
+    # Which connected Microsoft 365 mailbox sends platform notices (account-ready, access-request,
+    # password-reset). Blank = the first enabled connection. An identifier, not a credential.
+    PLATFORM_MAIL_TENANT_ID: ${PLATFORM_MAIL_TENANT_ID:-}
     PROVIDER_GATEWAY_URL: ${PROVIDER_GATEWAY_URL:-}
     OUTBOUND_ENABLED: ${OUTBOUND_ENABLED:-false}
     PLAN_ENFORCEMENT: ${PLAN_ENFORCEMENT:-off}

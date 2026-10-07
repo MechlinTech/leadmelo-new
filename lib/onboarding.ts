@@ -1,24 +1,19 @@
 import { randomBytes } from 'node:crypto';
 import { db } from './db';
 import { HttpError } from './http';
-import { hashToken } from './security';
+import { issueResetLink } from './identity';
 import { sendPlatformNotice } from './m365/send';
 import { PLANS, type PlanId } from './plans';
 
 type Actor = { id: string; tenantId: string; role: string };
-const RESET_TTL_MS = 3600000;
 const RESEND_COOLDOWN_MS = 60000;
 
 const slugBase = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'workspace';
 
 async function issueSetupLink(userId: string, now: Date) {
-  const token = randomBytes(32).toString('hex');
-  await db.$transaction(async tx => {
-    // A fresh link supersedes any earlier unused one, so at most one setup link is valid.
-    await tx.passwordReset.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });
-    await tx.passwordReset.create({ data: { userId, tokenHash: hashToken(token), expiresAt: new Date(now.getTime() + RESET_TTL_MS) } });
-  });
-  return `${process.env.APP_URL}/auth/reset?token=${token}`;
+  // Same single-use reset token as the self-service flow; only the token hash is stored.
+  const { resetUrl } = await issueResetLink(userId, now);
+  return resetUrl;
 }
 
 function accountReadyEmail(email: string, setPasswordUrl: string) {

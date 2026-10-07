@@ -54,6 +54,22 @@ export async function acceptInvite(token: string, password: string, name: string
   });
 }
 
+export const RESET_TTL_MS = 3600000;
+export const resetPasswordUrl = (token: string) => `${process.env.APP_URL}/auth/reset?token=${token}`;
+
+// Issues the one-time reset token for an account, whoever asked for it (an administrator
+// or the account owner through the forgot-password flow). Any earlier unused reset for the
+// same account is superseded, only the hash is stored, and the raw token travels in the link.
+export async function issueResetLink(userId: string, now = new Date()) {
+  const token = newToken();
+  const expiresAt = new Date(now.getTime() + RESET_TTL_MS);
+  await db.$transaction(async tx => {
+    await tx.passwordReset.updateMany({ where: { userId, usedAt: null }, data: { usedAt: now } });
+    await tx.passwordReset.create({ data: { userId, tokenHash: hashToken(token), expiresAt } });
+  });
+  return { token, expiresAt, resetUrl: resetPasswordUrl(token) };
+}
+
 export async function createReset(actor: Actor, userId: string, now = new Date()) {
   if (!isAdmin(actor.role)) throw new HttpError(403, 'admin_required');
   const target = await db.user.findFirst({ where: { id: userId, tenantId: actor.tenantId } });

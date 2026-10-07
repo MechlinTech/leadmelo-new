@@ -25,7 +25,7 @@ All of V20's migrations (5-9) are **additive**: new tables, new nullable or defa
 
 | Domain | Tables | Purpose |
 |---|---|---|
-| Tenancy and access | Tenant, User, Session, Invite, PasswordReset, TenantSetting, RateLimit | Tenants, staff accounts, expiring sessions, invitations, administrator-issued password resets, per-tenant settings and secrets, rate limiting |
+| Tenancy and access | Tenant, User, Session, Invite, PasswordReset, TenantSetting, RateLimit | Tenants, staff accounts, expiring sessions, invitations, administrator-issued and self-service password resets, per-tenant settings and secrets, rate limiting |
 | Targeting | ICP, Campaign, SequenceStep, CampaignVersion | Offer, targeting and email sequence; every material edit stores a full snapshot |
 | Prospects | Lead, Contact, Enrollment | Company and person records, de-duplication, per-campaign fit and evidence |
 | Execution | AutomationRun, OutreachEvent, WorkerHeartbeat | Durable queue with leases, attempts, idempotency keys and send reservations |

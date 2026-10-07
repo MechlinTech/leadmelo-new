@@ -53,6 +53,9 @@ table{width:100%;border-collapse:collapse;background:var(--surface)}
 td,th{padding:12px;text-align:left;border-bottom:1px solid var(--line);overflow-wrap:break-word;min-width:120px}
 th{font-size:13px;background:var(--surface-2)}
 caption{text-align:left;padding:8px 0}
+.emptyRow td{text-align:center;padding:32px 16px}
+.emptyRow strong{display:block;font-size:16px}
+.emptyRow p{margin:6px 0 0}
 fieldset{border:1px solid var(--line);border-radius:8px;padding:18px;display:grid;gap:15px;min-width:0}
 legend{font-weight:650}
 .recordList{list-style:none;padding:0}.recordList li{padding:14px 0;border-bottom:1px solid var(--line)}.recordList p{margin:6px 0}

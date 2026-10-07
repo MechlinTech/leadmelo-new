@@ -48,7 +48,8 @@ if ($Environment -eq 'dev') {
 foreach ($key in @(
   'APP_URL', 'HOST_PORT', 'COMPOSE_PROJECT_NAME', 'POSTGRES_DB',
   'POSTGRES_PASSWORD', 'APP_DB_PASSWORD', 'SESSION_SECRET', 'DATA_ENCRYPTION_KEY',
-  'PROVIDER_GATEWAY_URL', 'ALERT_WEBHOOK_URL', 'ALERT_WEBHOOK_SECRET'
+  'PROVIDER_GATEWAY_URL', 'ALERT_WEBHOOK_URL', 'ALERT_WEBHOOK_SECRET',
+  'PLATFORM_MAIL_TENANT_ID'
 )) {
   $value = [Environment]::GetEnvironmentVariable($key)
   if ($value) { $map[$key] = $value.Trim() }
@@ -67,7 +68,7 @@ foreach ($key in @(
   'POSTGRES_PASSWORD', 'APP_DB_PASSWORD', 'SESSION_SECRET', 'DATA_ENCRYPTION_KEY',
   'PROVIDER_GATEWAY_URL', 'ALERT_WEBHOOK_URL', 'ALERT_WEBHOOK_SECRET',
   'GATEWAY_CONFIG_DIR', 'OUTBOUND_ENABLED', 'PLAN_ENFORCEMENT', 'SENDER_HEALTH_AUTO',
-  'AI_ALLOWED_HOSTS', 'AI_DAILY_LIMIT'
+  'AI_ALLOWED_HOSTS', 'AI_DAILY_LIMIT', 'PLATFORM_MAIL_TENANT_ID'
 )) {
   if ($hostEnv.Contains($key) -and $hostEnv[$key]) { $map[$key] = $hostEnv[$key] }
 }

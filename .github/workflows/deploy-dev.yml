@@ -37,6 +37,7 @@ jobs:
           PROVIDER_GATEWAY_URL: ${{ secrets.PROVIDER_GATEWAY_URL }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           ALERT_WEBHOOK_SECRET: ${{ secrets.ALERT_WEBHOOK_SECRET }}
+          PLATFORM_MAIL_TENANT_ID: "${{ vars.PLATFORM_MAIL_TENANT_ID }}"
         run: |
           if (-not $env:APP_URL) { $env:APP_URL = 'http://localhost:7676' }
           if (-not $env:HOST_PORT) { $env:HOST_PORT = '7676' }
