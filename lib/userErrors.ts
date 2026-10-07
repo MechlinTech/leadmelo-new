@@ -43,6 +43,7 @@ const MESSAGES: Record<string, string> = {
   mail_body_template_empty: 'This message was not sent because its email step has no body text. Add body text to the step, then approve it again.',
   mail_subject_template_empty: 'This message was not sent because its email step has no subject text. Add a subject to the step, then approve it again.',
   mail_subject_blank: 'This message was not sent because its subject is empty. Add a subject to the email step, then approve it again.',
+  message_changed_since_review: 'The message changed after you reviewed it. Refresh the queue, review the latest content, and approve again.',
   provider_exceeded_limit: 'The discovery provider returned more prospects than permitted by the cap.',
   lease_expired_after_max_attempts: 'The run timed out across maximum retry attempts. Check system health and trigger a new run.',
   send_lease_exhausted: 'Email sending timed out across maximum retry attempts.',

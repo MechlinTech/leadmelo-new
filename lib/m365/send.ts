@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { db } from '../db';
-import { GraphClient, MailInput, mailboxPath, mimeMessage } from './graph';
+import { GraphClient, MailInput, emailBodyContentType, mailInput, mailboxPath, mimeMessage } from './graph';
 
 // Logs identify a recipient without disclosing the address.
 const hashRecipient = (email: string) => createHash('sha256').update(email.toLowerCase()).digest('hex').slice(0, 12);
@@ -35,6 +35,7 @@ export async function sendPlatformNotice(to: string, subject: string, text: stri
 }
 
 export async function sendMicrosoft(tenantId: string, key: string, input: MailInput, client?: GraphClient) {
+  mailInput.parse(input);
   const config = await db.m365Connection.findUnique({where:{tenantId}});
   if (!config?.enabled || input.tenantId !== tenantId || !config.mailboxes.includes(input.from)) throw new Error('m365_sender_not_allowed');
   const graph = client ?? new GraphClient(config);
@@ -57,7 +58,7 @@ export async function sendMicrosoft(tenantId: string, key: string, input: MailIn
     try {
       // Diagnostics only: message key, subject/body lengths, content type and provider status.
       // Never logs the body text, recipient address, credentials or tokens.
-      console.log(JSON.stringify({ event: 'm365_send_attempt', key, mailbox: input.from, subjectLength: input.subject.length, bodyLength: input.body.length, contentType: 'text/plain', recipient: hashRecipient(input.to) }));
+      console.log(JSON.stringify({ event: 'm365_send_attempt', messageId: key, subjectLength: input.subject.length, bodyLength: input.body.length, contentType: emailBodyContentType(input.body), recipientHash: hashRecipient(input.to) }));
       const message = await graph.request(`${base}/messages`, 'POST', mimeMessage(input,key), true);
       if (!message?.id) throw new Error('m365_draft_missing_id');
       console.log(JSON.stringify({ event: 'm365_draft_created', key, draftId: message.id, providerStatus: 'ok' }));
@@ -73,7 +74,7 @@ export async function sendMicrosoft(tenantId: string, key: string, input: MailIn
   try {
     await graph.request(`${base}/messages/${encodeURIComponent(receipt.draftId)}/send`, 'POST');
     await db.mailReceipt.update({where:{key},data:{status:'ACCEPTED',error:null}});
-    console.log(JSON.stringify({ event: 'm365_send_accepted', key, messageId: receipt.draftId, bodyLength: input.body.length, contentType: 'text/plain' }));
+    console.log(JSON.stringify({ event: 'm365_send_accepted', messageId: receipt.draftId, bodyLength: input.body.length, contentType: emailBodyContentType(input.body) }));
     return {messageId:receipt.draftId};
   } catch (error) {
     console.error(JSON.stringify({ event: 'm365_send_uncertain', key, draftId: receipt.draftId, error: error instanceof Error ? error.message : 'unknown' }));

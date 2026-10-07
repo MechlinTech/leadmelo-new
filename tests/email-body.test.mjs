@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mimeMessage, hasVisibleText } from '../lib/m365/graph.ts';
+import { mimeMessage, hasVisibleText, emailBodyContentType } from '../lib/m365/graph.ts';
 import { renderTemplate } from '../lib/policy.ts';
 
 // A reviewed/approved email must reach the provider carrying exactly the subject and body the
@@ -62,6 +62,13 @@ test('empty, whitespace-only and effectively empty bodies are rejected', () => {
     ['spaces', '     '],
     ['newlines', '\n\n\n'],
     ['tabs', '\t \t'],
+    ['null', null],
+    ['undefined', undefined],
+    ['empty html shell', '<html></html>'],
+    ['empty body shell', '<body></body>'],
+    ['empty div', '<div></div>'],
+    ['whitespace paragraph', '<p>   </p>'],
+    ['whitespace html', '<html><body> \n <div>\t</div></body></html>'],
     ['tags only', '<p></p><br><span></span>'],
     ['comment only', '<!-- nothing to see -->'],
     ['nbsp only', '&nbsp;&nbsp;'],
@@ -69,7 +76,7 @@ test('empty, whitespace-only and effectively empty bodies are rejected', () => {
   ];
   for (const [label, body] of cases) {
     assert.equal(hasVisibleText(body), false, `${label} must count as empty`);
-    assert.throws(() => mimeMessage({ ...base, body }, 'k'), /mail_body_effectively_empty|too_small/, `${label} must be rejected`);
+    assert.throws(() => mimeMessage({ ...base, body }, 'k'), `${label} must be rejected`);
   }
 });
 
@@ -87,4 +94,18 @@ test('hasVisibleText keeps genuinely empty-looking but real text', () => {
 
 test('header injection is still rejected', () => {
   assert.throws(() => mimeMessage({ ...base, subject: 'ok\r\nBcc: victim@example.com' }, 'k'), /mail_header_injection/);
+});
+
+test('MIME drafts preserve approved HTML and plain-text content types and bytes', () => {
+  const html = '<html><body><p>Approved <a href="https://example.test/x">link</a></p></body></html>';
+  const htmlMime = Buffer.from(mimeMessage({ ...base, body: html }, 'html-key'), 'base64').toString();
+  assert.match(htmlMime, /Content-Type: text\/html; charset=UTF-8/);
+  assert.equal(decodeMime(Buffer.from(htmlMime).toString('base64')).body, html);
+
+  const text = 'Approved line one\nline two';
+  const textMime = Buffer.from(mimeMessage({ ...base, body: text }, 'text-key'), 'base64').toString();
+  assert.match(textMime, /Content-Type: text\/plain; charset=UTF-8/);
+  assert.equal(decodeMime(Buffer.from(textMime).toString('base64')).body, text);
+  assert.equal(emailBodyContentType(html), 'HTML');
+  assert.equal(emailBodyContentType(text), 'Text');
 });

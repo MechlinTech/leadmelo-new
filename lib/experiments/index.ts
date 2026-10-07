@@ -57,14 +57,23 @@ export async function pickVariant(tx: Prisma.TransactionClient, tenantId: string
   const experiment = await tx.experiment.findFirst({ where: { tenantId, campaignId, stepOrder, status: 'RUNNING' }, include: { variants: { orderBy: { label: 'asc' } } } });
   if (!experiment) return null;
   const existing = await tx.experimentAssignment.findUnique({ where: { experimentId_enrollmentId: { experimentId: experiment.id, enrollmentId } } });
-  let variant = existing ? experiment.variants.find(v => v.id === existing.variantId) : undefined;
-  if (!variant) {
-    const total = experiment.variants.reduce((n, v) => n + v.weight, 0);
-    let point = parseInt(createHash('sha256').update(`${experiment.id}:${enrollmentId}`).digest('hex').slice(0, 12), 16) % total;
-    variant = experiment.variants.find(v => (point -= v.weight) < 0)!;
-    await tx.experimentAssignment.create({ data: { tenantId, experimentId: experiment.id, variantId: variant.id, enrollmentId } });
-  }
+  const variant = existing ? experiment.variants.find(v => v.id === existing.variantId) ?? selectVariant(experiment.id, enrollmentId, experiment.variants) : selectVariant(experiment.id, enrollmentId, experiment.variants);
+  if (!existing) await tx.experimentAssignment.create({ data: { tenantId, experimentId: experiment.id, variantId: variant.id, enrollmentId } });
   return variant.isControl ? null : { subject: variant.subject!, body: variant.body! };
+}
+
+export async function previewVariant(tx: Prisma.TransactionClient, tenantId: string, campaignId: string, enrollmentId: string, stepOrder: number) {
+  const experiment = await tx.experiment.findFirst({ where: { tenantId, campaignId, stepOrder, status: 'RUNNING' }, include: { variants: { orderBy: { label: 'asc' } } } });
+  if (!experiment) return null;
+  const existing = await tx.experimentAssignment.findUnique({ where: { experimentId_enrollmentId: { experimentId: experiment.id, enrollmentId } } });
+  const variant = existing ? experiment.variants.find(v => v.id === existing.variantId) ?? selectVariant(experiment.id, enrollmentId, experiment.variants) : selectVariant(experiment.id, enrollmentId, experiment.variants);
+  return variant.isControl ? null : { subject: variant.subject!, body: variant.body! };
+}
+
+function selectVariant<T extends { id: string; weight: number }>(experimentId: string, enrollmentId: string, variants: T[]) {
+  const total = variants.reduce((n, variant) => n + variant.weight, 0);
+  let point = parseInt(createHash('sha256').update(`${experimentId}:${enrollmentId}`).digest('hex').slice(0, 12), 16) % total;
+  return variants.find(variant => (point -= variant.weight) < 0)!;
 }
 
 const APPOINTMENT_BOOKED = ['BOOKED', 'COMPLETED', 'NO_SHOW', 'WON', 'LOST'] as const;

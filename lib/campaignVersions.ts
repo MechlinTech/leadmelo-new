@@ -58,7 +58,7 @@ export async function updateCampaign(tenantId: string, campaignId: string, actor
     }
     if (material) {
       // Prior approvals covered the old content; queued sends must be approved again.
-      await tx.outreachEvent.updateMany({ where: { tenantId, campaignId, status: 'QUEUED', purpose: 'SEQUENCE' }, data: { approvedAt: null } });
+      await tx.outreachEvent.updateMany({ where: { tenantId, campaignId, status: 'QUEUED', purpose: 'SEQUENCE' }, data: { approvedAt: null, subject: null, body: null } });
       await tx.outreachEvent.updateMany({ where: { tenantId, campaignId, status: 'QUEUED', purpose: 'SEQUENCE', stepOrder: { gt: Math.max(...sequenceSteps.map(s => s.stepOrder)) } }, data: { status: 'CANCELED', error: 'step_removed_by_version' } });
       const stored = await tx.campaign.findUniqueOrThrow({ where: { id: campaignId }, include: { sequenceSteps: true } });
       await tx.campaignVersion.create({ data: { tenantId, campaignId, version, snapshot: snapshotOf(stored) as unknown as Prisma.InputJsonValue, reason, actorUserId } });

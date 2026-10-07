@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { db } from './db';
 import { gateway, discoveredSchema, sentSchema } from './providers';
-import { qualifyProspect, withinSendWindow, addBusinessDays, renderTemplate, outreachWaitReason } from './policy';
+import { qualifyProspect, withinSendWindow, addBusinessDays, outreachWaitReason } from './policy';
 import { unsubscribeToken } from './unsubscribe';
+import { renderOutreachContent } from './outreachContent';
 import { sendMicrosoft } from './m365/send';
-import { MailInput, hasVisibleText } from './m365/graph';
+import { MailInput, emailBodyContentType, hasVisibleText, mailInput } from './m365/graph';
 import { pollMicrosoft } from './m365/sync';
 import { processReverification } from './reverification';
 import { collectAlerts, deliverAlert } from './alerts';
@@ -171,24 +172,20 @@ export async function processOutreach(now = new Date()) {
       const token = unsubscribeToken(e.tenantId, contact.email);
       const unsubscribeUrl = `${process.env.APP_URL}/unsubscribe?token=${encodeURIComponent(token)}`;
       const calendlyUrl = schedulingUrl(c.calendlyUrl, e.tenantId, c.id, contact.id);
-      const vars = { firstName: contact.fullName.split(' ')[0], company: lead?.company ?? '', senderName: c.senderName, calendlyUrl, offer: c.offer ?? '' };
       // A running experiment may substitute this step's copy; the choice is persisted with the send.
       const variant = step ? await pickVariant(tx, e.tenantId, c.id, enrollment.id, step.stepOrder) : null;
-      // Copy already stored on the event (a booking invitation, or a previously rendered message) is
-      // authoritative. Otherwise it comes from the step or experiment variant.
-      // Falling back to '' produced an email whose only content was the postal address and the
-      // unsubscribe footer, which arrives blank. Refuse to send instead, so it stays QUEUED with a
-      // visible reason rather than being marked SENT.
-      const subjectTemplate = variant?.subject ?? step?.subject ?? '';
-      const bodyTemplate = variant?.body ?? step?.body ?? '';
-      if (e.subject === null && !hasVisibleText(subjectTemplate)) throw new Error('mail_subject_template_empty');
-      if (e.body === null && !hasVisibleText(bodyTemplate)) throw new Error('mail_body_template_empty');
-      const subject = e.subject ?? renderTemplate(subjectTemplate, vars);
-      const content = e.body ?? renderTemplate(bodyTemplate, vars);
-      const body = content.includes('\nUnsubscribe: ') ? content : `${content}\n\n${s!.postalAddress}\nUnsubscribe: ${unsubscribeUrl}`;
-      if (!hasVisibleText(body) || !subject.trim()) throw new Error('mail_body_effectively_empty');
+      const rendered = renderOutreachContent({
+        existingSubject: e.subject,
+        existingBody: e.body,
+        subjectTemplate: variant?.subject ?? step?.subject ?? '',
+        bodyTemplate: variant?.body ?? step?.body ?? '',
+        variables: { firstName: contact.fullName.trim().split(/\s+/)[0] || 'there', company: lead?.company ?? '', senderName: c.senderName, calendlyUrl, offer: c.offer ?? '' },
+        postalAddress: s?.postalAddress ?? '',
+        unsubscribeUrl
+      });
+      const { subject, body } = rendered;
       // Diagnostics only: id, lengths, content type. Never the body text or any credential.
-      console.log(JSON.stringify({ event: 'outreach_prepared', id: e.id, messageKey: e.idempotencyKey, purpose: e.purpose, stepOrder: e.stepOrder, subjectLength: subject.length, bodyLength: body.length, contentType: 'text/plain', variant: !!variant, storedBody: e.body !== null }));
+      console.log(JSON.stringify({ event: 'outreach_prepared', id: e.id, messageKey: e.idempotencyKey, purpose: e.purpose, stepOrder: e.stepOrder, subjectLength: subject.length, bodyLength: body.length, contentType: rendered.contentType, variant: !!variant, storedBody: e.body !== null }));
       await tx.outreachEvent.update({ where: { id: e.id }, data: { status: 'SENDING', attempts: { increment: 1 }, leaseToken, leaseUntil: new Date(now.getTime() + 120000), reservedAt: now, subject, body } });
       const input: MailInput = { tenantId: e.tenantId, campaignId: c.id, contactId: contact.id, from: c.senderEmail, fromName: c.senderName, to: contact.email, subject, body, headers: { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }, calendlyUrl };
       return {e,c,contact,enrollment,step,input,key:s!.gatewayKey!,microsoft:!!microsoft};
@@ -205,6 +202,10 @@ export async function processOutreach(now = new Date()) {
       if (process.env.OUTBOUND_ENABLED!=='true' || !settings.automationEnabled || campaign.status!=='ACTIVE' || campaign.automationMode==='PAUSED') {
         await db.outreachEvent.updateMany({where:{id:e.id,status:'SENDING',leaseToken},data:{status:'QUEUED',leaseUntil:null,scheduledAt:new Date(now.getTime()+900000)}}); return true;
       }
+      if (!input.subject.trim()) throw new Error('mail_subject_blank');
+      if (!hasVisibleText(input.body)) throw new Error('mail_body_effectively_empty');
+      mailInput.parse(input);
+      console.log(JSON.stringify({ event: 'email_send_start', messageId: e.id, jobId: e.idempotencyKey, subjectLength: input.subject.length, bodyLength: input.body.length, contentType: emailBodyContentType(input.body) }));
       const result = prepared.microsoft ? await sendMicrosoft(e.tenantId,e.idempotencyKey,input) : await gateway(prepared.key,'send',e.idempotencyKey,input,sentSchema);
       await db.$transaction(async tx => {
         await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id=${e.tenantId} FOR UPDATE`;
@@ -227,7 +228,9 @@ export async function processOutreach(now = new Date()) {
         }
       });
     } catch (error) {
-      await db.outreachEvent.updateMany({ where: { id: e.id, status:'SENDING', leaseToken }, data: { status: e.attempts + 1 >= 5 ? 'FAILED' : 'QUEUED', scheduledAt: new Date(now.getTime() + 60000 * 2 ** e.attempts), leaseUntil: null, error: safeError(error) } });
+      const code = safeError(error);
+      const invalidContent = /^mail_(subject|body)_/.test(code);
+      await db.outreachEvent.updateMany({ where: { id: e.id, status:'SENDING', leaseToken }, data: { status: invalidContent || e.attempts + 1 >= 5 ? 'FAILED' : 'QUEUED', scheduledAt: new Date(now.getTime() + 60000 * 2 ** e.attempts), leaseUntil: null, error: code } });
     }
     return true;
   } catch (error) {

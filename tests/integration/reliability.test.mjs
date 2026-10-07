@@ -13,6 +13,7 @@ import { processOutreach } from '../../lib/worker.ts';
 import { createSession,sessionCookie } from '../../lib/auth.ts';
 import { GET as getAlerts, PATCH as acknowledge } from '../../app/api/alerts/route.ts';
 import { GET as getM365, PUT as configureM365, DELETE as disableM365 } from '../../app/api/integrations/m365/route.ts';
+import { GET as getOutreach, PATCH as approveOutreach } from '../../app/api/outreach/route.ts';
 
 if(process.env.TEST_DATABASE_CONFIRM!=='isolated') throw new Error('isolated database required');
 process.env.DATA_ENCRYPTION_KEY=Buffer.alloc(32,9).toString('base64');
@@ -110,6 +111,109 @@ test('Microsoft 365 and autonomous recovery database flows',async t=>{
    assert.equal(nativeSends,1);
    assert.equal((await db.outreachEvent.findFirst({where:{tenantId:tenant.id,purpose:'BOOKING_INVITATION'}})).status,'SENT');
    globalThis.fetch=originalFetch;
+  });
+  await t.test('Review snapshot reaches the Graph draft unchanged; empty approved bodies never reach Graph', async t => {
+   const graphRequests = [];
+   globalThis.fetch = async (url, options = {}) => {
+    const address = String(url);
+    if (address.includes('login.microsoftonline.com')) return Response.json({ access_token: 'mocked-token' });
+    if (address.endsWith('/send')) { graphRequests.push({ kind: 'send', address }); return new Response(null, { status: 202, headers: { 'request-id': 'mock-send-request' } }); }
+    if (options.method === 'POST' && address.endsWith('/messages')) {
+      graphRequests.push({ kind: 'draft', address, body: String(options.body), contentType: options.headers['Content-Type'] });
+      return Response.json({ id: `draft-${graphRequests.length}`, internetMessageId: '<mocked@example.com>' }, { status: 201, headers: { 'request-id': 'mock-draft-request' } });
+    }
+    throw new Error('unexpected_mock_graph_request');
+   };
+
+   const makeQueuedReview = async (label, body, storedBody) => {
+    const email = `review-${label}-${randomUUID()}@example.com`;
+    const lead = await db.lead.create({ data: { tenantId: tenant.id, company: 'Review & Co', domain: `review-${randomUUID()}.example` } });
+    const contact = await db.contact.create({ data: { tenantId: tenant.id, leadId: lead.id, fullName: 'Review Buyer', email, verification: 'VALID', lastVerifiedAt: new Date() } });
+    const campaign = await db.campaign.create({ data: {
+     tenantId: tenant.id, name: `Review ${label}`, offer: 'A tailored demo', senderName: 'Sender', senderEmail: input.from,
+     calendlyUrl: 'https://calendly.com/test', status: 'ACTIVE', automationMode: 'REVIEW_BEFORE_SEND', businessDaysOnly: false,
+     sendStartHour: 0, sendEndHour: 24,
+     sequenceSteps: { create: [{ stepOrder: 1, waitBusinessDays: 0, subject: 'Hello {{firstName}}', body }] }
+    } });
+    await db.enrollment.create({ data: { tenantId: tenant.id, campaignId: campaign.id, contactId: contact.id, score: 90, hasBuyer: true, hasPainSignal: true, evidence: { synthetic: true } } });
+    const event = await db.outreachEvent.create({ data: {
+     tenantId: tenant.id, campaignId: campaign.id, contactId: contact.id, leadId: lead.id, stepOrder: 1,
+     status: 'QUEUED', scheduledAt: new Date(), subject: null, body: storedBody,
+     idempotencyKey: `reviewed-${randomUUID()}`
+    } });
+    await db.deliverabilityProfile.upsert({
+     where: { tenantId_senderEmail: { tenantId: tenant.id, senderEmail: input.from } },
+     update: { status: 'HEALTHY', dailyCap: 25, lastCheckedAt: new Date() },
+     create: { tenantId: tenant.id, senderEmail: input.from, domain: 'example.com', status: 'HEALTHY', dailyCap: 25, lastCheckedAt: new Date() }
+    });
+    await db.mailCursor.upsert({
+     where: { tenantId_mailbox: { tenantId: tenant.id, mailbox: input.from } },
+     update: { lastSuccessAt: new Date(), error: null },
+     create: { tenantId: tenant.id, mailbox: input.from, lastSuccessAt: new Date() }
+    });
+    await db.outreachEvent.updateMany({ where: { tenantId: tenant.id, status: 'QUEUED', id: { not: event.id } }, data: { scheduledAt: new Date('2099-01-01') } });
+    return { event, campaign, contact };
+   };
+
+   const reviewed = async (label, sourceBody, storedBody = null) => {
+    const { event, campaign } = await makeQueuedReview(label, sourceBody, storedBody);
+    const listed = await getOutreach(req('outreach'));
+    assert.equal(listed.status, 200);
+    const review = (await listed.json()).find(row => row.id === event.id);
+    assert.ok(review.reviewToken);
+    assert.equal(review.reviewSubject, 'Hello Review');
+    assert.match(review.reviewBody, /Review at Review (?:&amp;|&) Co/);
+    const approval = await approveOutreach(req('outreach', 'PATCH', { id: event.id, reviewToken: review.reviewToken }));
+    assert.equal(approval.status, 200);
+    const snapshot = await db.outreachEvent.findUniqueOrThrow({ where: { id: event.id } });
+    assert.equal(snapshot.subject, review.reviewSubject);
+    assert.equal(snapshot.body, review.reviewBody);
+    assert.ok(snapshot.approvedAt);
+
+    // Simulate a stale queued job/campaign read after approval. The worker must send the
+    // persisted approval snapshot, not re-render the now-different sequence step.
+    await db.sequenceStep.update({ where: { campaignId_stepOrder: { campaignId: campaign.id, stepOrder: 1 } }, data: { body: 'Changed after approval' } });
+    await db.outreachEvent.updateMany({ where: { tenantId: tenant.id, status: 'QUEUED', id: { not: event.id } }, data: { scheduledAt: new Date('2099-01-01') } });
+    assert.equal(await processOutreach(), true);
+    const sentEvent = await db.outreachEvent.findUniqueOrThrow({ where: { id: event.id } });
+    assert.equal(sentEvent.status, 'SENT');
+    assert.equal(sentEvent.subject, review.reviewSubject);
+    assert.equal(sentEvent.body, review.reviewBody);
+    const draft = graphRequests.findLast(request => request.kind === 'draft');
+    assert.ok(draft, 'worker submitted a draft to mocked Graph');
+    const rawMime = Buffer.from(draft.body, 'base64').toString('utf8');
+    const divider = rawMime.indexOf('\r\n\r\n');
+    const headers = rawMime.slice(0, divider), encodedBody = rawMime.slice(divider + 4).replace(/\r\n/g, '');
+    const providerBody = Buffer.from(encodedBody, 'base64').toString('utf8');
+    const encodedSubject = headers.match(/^Subject: =\?UTF-8\?B\?(.+)\?=$/m)?.[1];
+    assert.equal(Buffer.from(encodedSubject, 'base64').toString('utf8'), review.reviewSubject);
+    assert.equal(providerBody, review.reviewBody, 'Graph MIME body equals the approved review snapshot byte-for-byte');
+    assert.equal(headers.match(/^Content-Type: ([^;]+)/m)?.[1], label === 'html' ? 'text/html' : 'text/plain');
+    assert.equal(draft.contentType, 'text/plain', 'Graph MIME request uses the documented HTTP media type');
+    return review;
+   };
+
+   try {
+    await t.test('approved HTML preserves personalization, links and markup', async () => {
+     const review = await reviewed('html', '<html><body><p>Review {{firstName}} at {{company}}</p><a href="{{calendlyUrl}}">Choose a time</a><strong>{{offer}}</strong></body></html>');
+    assert.match(review.reviewBody, /<a href="https:\/\/calendly\.com\/test\?utm_source=leadmelo&amp;utm_content=/);
+     assert.match(review.reviewBody, /<strong>A tailored demo<\/strong>/);
+    });
+    await t.test('approved plain text preserves the exact rendered copy', async () => {
+     const review = await reviewed('text', 'Hello {{firstName}} at {{company}}.\n\n{{offer}}');
+    assert.match(review.reviewBody, /Hello Review at Review & Co\.\n\nA tailored demo/);
+    });
+    await t.test('empty stored body is failed before any Graph request', async () => {
+     const { event } = await makeQueuedReview('empty', 'Valid fallback must not replace an explicitly empty approved body', '');
+      await db.outreachEvent.update({ where: { id: event.id }, data: { approvedAt: new Date() } });
+     const requestCount = graphRequests.length;
+     assert.equal(await processOutreach(), false);
+     const failed = await db.outreachEvent.findUniqueOrThrow({ where: { id: event.id } });
+     assert.equal(failed.status, 'FAILED');
+     assert.equal(failed.error, 'mail_body_effectively_empty');
+     assert.equal(graphRequests.length, requestCount, 'neither draft creation nor send was requested');
+    });
+   } finally { globalThis.fetch = originalFetch; }
   });
   await t.test('pricing question raises review alert and cancels pending invitation',async()=>{
    await db.outreachEvent.create({data:{tenantId:tenant.id,campaignId:campaign.id,contactId:contact.id,leadId:lead.id,purpose:'BOOKING_INVITATION'}});
