@@ -21,7 +21,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
   gate.taken = true;
   const canWrite = ['TENANT_ADMIN', 'SUPER_ADMIN', 'MANAGER'].includes(user.role);
   return <AppRoleProvider canWrite={canWrite} role={user.role}><ThemeBoot /><div className="appShell">
-    <aside className="side"><a href="/app" className="brand" aria-label="LeadMelo home"><Logo /></a><AppNav operator={user.role === 'SUPER_ADMIN'} /><div style={{ display: 'grid', gap: 8 }}><InstallApp /><Logout /></div></aside>
+    <aside className="side"><a href="/app" className="brand" aria-label="LeadMelo home"><Logo /></a><AppNav operator={user.role === 'SUPER_ADMIN'} /><div className="sideActions"><InstallApp /><Logout /></div></aside>
     <main id="main" className="main">{children}<AssistantWidget audience="app" /></main>
   </div></AppRoleProvider>;
 }
