@@ -1,0 +1,36 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "Ak/Bug-Fix",
+    "fix/comprehensive-ui-ux",
+    "fix/lm-06-experiment-name-overflow",
+    "fix/refresh-button",
+    "fix/security",
+    "fix/sidebar",
+    "fix/sidebar-ui",
+    "main",
+    "production"
+  ],
+  "parent": {
+    "Ak/Bug-Fix": "main",
+    "fix/comprehensive-ui-ux": "main",
+    "fix/lm-06-experiment-name-overflow": "main",
+    "fix/refresh-button": "main",
+    "fix/security": "main",
+    "fix/sidebar": "main",
+    "fix/sidebar-ui": "fix/sidebar",
+    "main": null,
+    "production": "main"
+  },
+  "order": [
+    "main",
+    "Ak/Bug-Fix",
+    "fix/comprehensive-ui-ux",
+    "fix/lm-06-experiment-name-overflow",
+    "fix/refresh-button",
+    "fix/security",
+    "fix/sidebar",
+    "production",
+    "fix/sidebar-ui"
+  ]
+}
