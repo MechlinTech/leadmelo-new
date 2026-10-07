@@ -9,9 +9,9 @@ const windows = [[24, 'Last 24 hours'], [168, 'Last 7 days'], [720, 'Last 30 day
 export default function DigestPanel() {
   const [hours, setHours] = useState(24);
   const [digest, setDigest] = useState<Digest | null>(null), [error, setError] = useState('');
-  useEffect(() => { setDigest(null); api<Digest>(`digest?hours=${hours}`).then(setDigest).catch(e => setError((e as Error).message)); }, [hours]);
+  useEffect(() => { api<Digest>(`digest?hours=${hours}`).then(setDigest).catch(e => setError((e as Error).message)); }, [hours]);
   if (error) return <p role="alert" className="error">Summary unavailable: {error}</p>;
-  if (!digest) return <p role="status" className="muted">Loading summary...</p>;
+  if (!digest) return null;
   const title = windows.find(w => w[0] === hours)?.[1] ?? 'Last 24 hours';
   return <section aria-labelledby="digest-title">
     <div className="toolbar"><h2 id="digest-title">{title}</h2>
