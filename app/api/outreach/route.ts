@@ -52,7 +52,7 @@ export const GET = endpoint(async req => {
     if (event.status !== 'QUEUED') return event;
     try {
       const preview = await db.$transaction(tx => reviewContent(tx, event, false));
-      return { ...event, reviewSubject: preview.subject, reviewBody: preview.body, reviewContentType: preview.contentType, reviewToken: preview.reviewToken };
+      return { ...event, reviewSubject: preview.subject, reviewBody: preview.body, reviewContentType: preview.contentType, reviewToken: preview.reviewToken, statusLabel: event.approvedAt ? 'APPROVED' : event.status };
     } catch (error) {
       return { ...event, reviewError: error instanceof Error ? error.message : 'review_message_unavailable' };
     }

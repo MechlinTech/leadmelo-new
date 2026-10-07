@@ -18,10 +18,37 @@ export default function SecuritySettings() {
   const enable = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const data = new FormData(e.currentTarget); return run(async () => {
     setCodes((await api<{ recoveryCodes: string[] }>('auth/mfa/enable', 'POST', { code: String(data.get('code')) })).recoveryCodes); setMfa(null);
   }); };
+  const changePassword = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget, data = new FormData(form);
+    const newPassword = String(data.get('newPassword') ?? '');
+    if (newPassword !== String(data.get('confirmPassword') ?? '')) { setError('The new passwords do not match.'); return; }
+    return run(async () => {
+      try {
+        await api('auth/change-password', 'POST', { currentPassword: String(data.get('currentPassword') ?? ''), newPassword });
+        setNotice('Password changed. Your sessions were signed out; sign in again to continue.');
+        form.reset();
+      } catch (e) {
+        const code = (e as Error).message;
+        if (code === 'invalid_credentials') throw new Error('The current password is incorrect.');
+        if (code === 'password_unchanged') throw new Error('Choose a password different from your current one.');
+        throw new Error('Password change failed. Check the new password and try again.');
+      }
+    });
+  };
   return <>
   <section aria-labelledby="security-title">
     <h2 id="security-title">Your sign-in security</h2>
     {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
+    <form className="editor" onSubmit={changePassword}>
+      <h3>Change password</h3>
+      <label>Current password<input className="input" name="currentPassword" type="password" autoComplete="current-password" required/></label>
+      <div className="formGrid">
+        <label>New password (12 characters or more)<input className="input" name="newPassword" type="password" autoComplete="new-password" minLength={12} required/></label>
+        <label>Confirm new password<input className="input" name="confirmPassword" type="password" autoComplete="new-password" minLength={12} required/></label>
+      </div>
+      <button disabled={busy}>Change password</button>
+    </form>
     {codes ? <div role="status"><p><strong>Two-factor authentication is on.</strong> Save these recovery codes now. Each works once and they will not be shown again.</p><pre>{codes.join('\n')}</pre><button onClick={() => setCodes(null)}>I have saved them</button></div>
       : mfa ? <form className="editor" onSubmit={enable}><p>Add this key to an authenticator app (manual entry, time-based), then enter the 6-digit code it shows.</p><pre aria-label="Authenticator key">{mfa.secret}</pre><details><summary>Setup URI</summary><pre>{mfa.otpauthUri}</pre></details><label>6-digit code<input className="input" name="code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" required/></label><button disabled={busy}>Turn on two-factor authentication</button></form>
       : <button disabled={busy} onClick={() => void run(async () => setMfa(await api('auth/mfa/setup', 'POST', {})))}>Set up two-factor authentication</button>}

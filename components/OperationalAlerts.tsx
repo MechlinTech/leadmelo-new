@@ -12,6 +12,7 @@ const LABELS: Record<string, string> = {
   verification_exhausted: 'Verification exhausted', m365_send_needs_reconciliation: 'Microsoft send needs review',
   booking_failure: 'Booking failure', bounced_email: 'Bounced email', missed_webhook: 'Missed webhook',
   test_exception: 'Test exception', calendly_reconcile_failed: 'Calendly recovery failed',
+  calendly_webhook_missing: 'Calendly webhook not subscribed', calendly_account_mismatch: 'Calendly account does not own the campaign link',
   bounce_notice_unattributed: 'Unattributed bounce', mail_sync_failed: 'Mail sync failed', test_failure: 'Test failure', reply_review: 'Reply needs review'
 };
 

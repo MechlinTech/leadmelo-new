@@ -125,6 +125,14 @@ enum AppointmentStatus {
   LOST
 }
 
+enum MeetingOutcome {
+  COMPLETED
+  NO_SHOW
+  DISQUALIFIED
+  WON
+  LOST
+}
+
 enum DeliverabilityStatus {
   HEALTHY
   WATCHLIST
@@ -446,6 +454,7 @@ model Appointment {
   providerUpdatedAt  DateTime?
   qualified          Boolean           @default(false)
   status             AppointmentStatus @default(REQUESTED)
+  outcome            MeetingOutcome?
   calendlyEventUri   String?
   scheduledStart     DateTime?
   scheduledEnd       DateTime?

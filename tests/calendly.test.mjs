@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, randomBytes } from 'node:crypto';
 process.env.DATA_ENCRYPTION_KEY = randomBytes(32).toString('base64');
-const { attributionToken, parseAttributionToken, schedulingUrl, verifyCalendlySignature, normalizeCalendlyEvent } = await import('../lib/calendly.ts');
+const { attributionToken, parseAttributionToken, schedulingUrl, verifyCalendlySignature, normalizeCalendlyEvent, calendlyLinkSlug, calendlySubscriptionCovers } = await import('../lib/calendly.ts');
 
 const sign = (raw, key, t = Math.floor(Date.now() / 1000)) => `t=${t},v1=${createHmac('sha256', key).update(`${t}.${raw}`).digest('hex')}`;
 const envelope = (event, utm, extra = {}) => ({ event, created_at: '2026-09-18T12:00:00.000Z', payload: { uri: 'https://api.calendly.com/scheduled_events/E1/invitees/I1', email: 'Buyer@Example.com', timezone: 'America/New_York', tracking: { utm_content: utm }, scheduled_event: { uri: 'https://api.calendly.com/scheduled_events/E1', start_time: '2026-09-25T15:00:00.000000Z', end_time: '2026-09-25T15:30:00.000000Z' }, ...extra } });
@@ -56,6 +56,17 @@ test('cancellation uses provider cancel time and event ids differ from creation'
   assert.equal(canceled.event.occurredAt, '2026-09-19T08:00:00.000Z');
   assert.notEqual(canceled.event.id, created.event.id);
   assert.equal(canceled.event.bookingId, created.event.bookingId);
+});
+test('campaign link slug and webhook coverage are checked without accepting a partial subscription', () => {
+  assert.equal(calendlyLinkSlug('https://calendly.com/pm-mechlintech/30min'), 'pm-mechlintech');
+  assert.equal(calendlyLinkSlug('https://calendly.com/akshat-mechlin'), 'akshat-mechlin');
+  assert.equal(calendlyLinkSlug('https://example.com/pm-mechlintech/30min'), null);
+  const expected = 'https://app.example.com/api/webhooks/calendly/tenant1';
+  const ready = { state: 'active', events: ['invitee.created', 'invitee.canceled'], callback_url: expected };
+  assert.equal(calendlySubscriptionCovers([ready], expected), true);
+  assert.equal(calendlySubscriptionCovers([{ ...ready, events: ['invitee.created'] }], expected), false, 'cancellation is required');
+  assert.equal(calendlySubscriptionCovers([{ ...ready, callback_url: 'https://potentially.example.com/api/calendly/webhook' }], expected), false);
+  assert.equal(calendlySubscriptionCovers([{ ...ready, state: 'disabled' }], expected), false);
 });
 test('malformed payloads and unknown contacts are rejected', () => {
   const token = attributionToken('t1', 'camp1', 'con1');

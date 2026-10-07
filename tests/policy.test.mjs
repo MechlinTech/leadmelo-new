@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
 import { classifyReply } from '../lib/replies.ts';
-import { qualifyProspect, withinSendWindow, addBusinessDays, renderTemplate, outreachWaitReason } from '../lib/policy.ts';
+import { qualifyProspect, withinSendWindow, addBusinessDays, renderTemplate, outreachWaitReason, followUpDueAt, qaFollowUpDelayMinutes } from '../lib/policy.ts';
 import { verifyWebhook } from '../lib/webhooks.ts';
 import { encrypt, decrypt, hashPassword, verifyPassword } from '../lib/crypto.ts';
 import { unsubscribeToken, parseUnsubscribe } from '../lib/unsubscribe.ts';
@@ -62,6 +62,23 @@ test('outreach wait reason names the send window before other readiness gates', 
   const inWindow = new Date('2026-10-01T17:00:00Z'); // 10:00 LA
   assert.equal(outreachWaitReason({ campaign, settings, health, approvedAt: inWindow, mailboxBlocked: false, stale: false, now: inWindow }), null);
   assert.equal(outreachWaitReason({ campaign, settings, health, approvedAt: inWindow, mailboxBlocked: true, stale: false, now: inWindow }), 'mailbox_sync_unhealthy');
+});
+test('the QA follow-up override is opt-in, strictly positive, and restores production timing when unset', () => {
+  assert.equal(qaFollowUpDelayMinutes({}), null, 'unset means normal production timing');
+  assert.equal(qaFollowUpDelayMinutes({ TEMP_QA_FOLLOWUP_MINUTES: '' }), null);
+  assert.equal(qaFollowUpDelayMinutes({ TEMP_QA_FOLLOWUP_MINUTES: '   ' }), null);
+  for (const bad of ['0', '-5', 'abc', '5m', 'NaN']) assert.equal(qaFollowUpDelayMinutes({ TEMP_QA_FOLLOWUP_MINUTES: bad }), null, `${bad} must not shorten the delay`);
+  assert.equal(qaFollowUpDelayMinutes({ TEMP_QA_FOLLOWUP_MINUTES: '5' }), 5);
+  assert.equal(qaFollowUpDelayMinutes({ TEMP_QA_FOLLOWUP_MINUTES: ' 5 ' }), 5);
+});
+test('a follow-up counts from the previous email SENT time, not its creation or approval time', () => {
+  const sentAt = new Date('2026-10-06T20:00:00Z');
+  const base = { timezone: 'America/Los_Angeles', holidays: [] };
+  assert.equal(followUpDueAt({ from: sentAt, waitBusinessDays: 3, ...base, qaMinutes: 5 }).toISOString(), '2026-10-06T20:05:00.000Z', 'the QA delay is measured from the SENT timestamp');
+  assert.equal(followUpDueAt({ from: sentAt, waitBusinessDays: 3, ...base, qaMinutes: null }).toISOString(), addBusinessDays(sentAt, 3, base.timezone).toISOString(), 'production timing is unchanged and still skips weekends');
+  // A Monday send + 1 business day must skip the weekend, proving the base is the sent time.
+  const monday = new Date('2026-10-05T18:00:00Z');
+  assert.equal(addBusinessDays(monday, 1, base.timezone).toISOString(), '2026-10-06T18:00:00.000Z');
 });
 test('template rendering rejects undefined variables', () => {
   assert.equal(renderTemplate('Hi {{firstName}}', { firstName: 'Alex' }), 'Hi Alex');

@@ -34,6 +34,27 @@ export function schedulingUrl(baseUrl: string, tenantId: string, campaignId: str
   return url.toString();
 }
 
+// First path segment of a Calendly scheduling link: calendly.com/<user>/...
+export function calendlyLinkSlug(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== 'calendly.com' && !parsed.hostname.endsWith('.calendly.com')) return null;
+    return parsed.pathname.split('/').filter(Boolean)[0] ?? null;
+  } catch { return null; }
+}
+
+export type CalendlySubscription = { state?: string | null; events?: string[] | null; callback_url?: string | null };
+
+// A subscription covers LeadMelo only when it is active, posts both booking events, and targets this tenant.
+export function calendlySubscriptionCovers(subs: CalendlySubscription[], expectedUrl: string) {
+  const expected = expectedUrl.replace(/\/$/, '');
+  return subs.some(s => {
+    const url = (s.callback_url ?? '').replace(/\/$/, '');
+    const events = s.events ?? [];
+    return s.state === 'active' && url === expected && events.includes('invitee.created') && events.includes('invitee.canceled');
+  });
+}
+
 // Calendly-Webhook-Signature: t=<unix seconds>,v1=<hex hmac-sha256 of "t.body">
 // (developer.calendly.com/api-docs/overview/webhooks/webhook-signatures). Calendly recommends
 // rejecting timestamps older than 3 minutes.

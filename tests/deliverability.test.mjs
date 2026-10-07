@@ -72,6 +72,8 @@ test('holidays: date in the campaign time zone, send window, and business-day ar
   assert.equal(day(addBusinessDays(start, 3, 'America/Los_Angeles', ['2026-12-24'])), '2026-12-25');
   assert.equal(day(addBusinessDays(start, 3, 'America/Los_Angeles', ['2026-12-24', '2026-12-25'])), '2026-12-28', 'skips the holiday and the weekend');
   assert.equal(day(addBusinessDays(start, 0, 'America/Los_Angeles', ['2026-12-21'])), '2026-12-21');
+  assert.equal(addBusinessDays(new Date('2026-03-06T17:30:00Z'), 1, 'America/Los_Angeles').toISOString(), '2026-03-09T16:30:00.000Z', 'keeps 09:30 local time after spring DST starts');
+  assert.equal(addBusinessDays(new Date('2026-10-30T16:30:00Z'), 1, 'America/Los_Angeles').toISOString(), '2026-11-02T17:30:00.000Z', 'keeps 09:30 local time after fall DST ends');
 });
 test('campaign input validates holiday dates', () => {
   const base = { name: 'n', icpId: 'i', senderName: 's', senderEmail: 'a@b.co', calendlyUrl: 'https://calendly.com/x', sequenceSteps: [{ stepOrder: 1, waitBusinessDays: 0, subject: 's', body: 'b' }] };

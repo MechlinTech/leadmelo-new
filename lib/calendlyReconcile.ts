@@ -4,7 +4,7 @@ import { decrypt } from './crypto';
 import { HttpError } from './http';
 import { raiseAlert } from './alerts';
 import { handleProviderEvent } from './webhooks';
-import { normalizeCalendlyEvent } from './calendly';
+import { calendlyLinkSlug, calendlySubscriptionCovers, normalizeCalendlyEvent, type CalendlySubscription } from './calendly';
 
 // Recovers bookings whose webhooks were missed. Calendly API per its OpenAPI file:
 //   GET /scheduled_events?organization=&min_start_time=&count=&page_token=   -> { collection, pagination.next_page_token }
@@ -28,10 +28,49 @@ async function get(fetcher: typeof fetch, token: string, url: URL) {
   return page.parse(JSON.parse(text));
 }
 
+async function readJson(fetcher: typeof fetch, token: string, url: URL) {
+  if (url.origin !== API) throw new HttpError(502, 'calendly_unexpected_origin');
+  const res = await fetcher(url, { redirect: 'error', signal: AbortSignal.timeout(20000), headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+  if (res.status === 401 || res.status === 403) throw new HttpError(502, 'calendly_auth_failed');
+  if (res.status === 429) throw new HttpError(503, 'calendly_rate_limited');
+  if (!res.ok) throw new HttpError(502, `calendly_http_${res.status}`);
+  const text = await res.text();
+  if (text.length > 2_000_000) throw new HttpError(502, 'calendly_response_too_large');
+  return JSON.parse(text) as unknown;
+}
+
+// Reports a webhook pointed at another app, or a token whose Calendly user does not own the campaign link.
+// Diagnostic only: a failure here must not block importing attributed bookings.
+export async function auditCalendlyConnection(tenantId: string, fetcher: typeof fetch, token: string, org: string, now = new Date()) {
+  const day = now.toISOString().slice(0, 10);
+  const me = await readJson(fetcher, token, new URL(`${API}/users/me`)) as { resource?: { uri?: string; slug?: string } };
+  const slug = me.resource?.slug;
+  const campaigns = await db.campaign.findMany({ where: { tenantId, status: 'ACTIVE' }, select: { calendlyUrl: true } });
+  const hosts = [...new Set(campaigns.map(c => calendlyLinkSlug(c.calendlyUrl)).filter((v): v is string => !!v))];
+  if (slug && hosts.some(h => h !== slug)) {
+    await raiseAlert(tenantId, 'calendly_account_mismatch', `${slug}:${hosts.filter(h => h !== slug).sort().join(',')}:${day}`);
+  }
+  const orgHooks = await readJson(fetcher, token, new URL(`${API}/webhook_subscriptions?organization=${encodeURIComponent(org)}&scope=organization&count=20`)) as { collection?: CalendlySubscription[] };
+  const userUri = me.resource?.uri;
+  const userHooks = userUri
+    ? await readJson(fetcher, token, new URL(`${API}/webhook_subscriptions?organization=${encodeURIComponent(org)}&scope=user&user=${encodeURIComponent(userUri)}&count=20`)) as { collection?: CalendlySubscription[] }
+    : { collection: [] };
+  const app = (process.env.APP_URL ?? '').replace(/\/$/, '');
+  if (app) {
+    const expected = `${app}/api/webhooks/calendly/${tenantId}`;
+    const subs = [...(orgHooks.collection ?? []), ...(userHooks.collection ?? [])];
+    if (!calendlySubscriptionCovers(subs, expected)) await raiseAlert(tenantId, 'calendly_webhook_missing', day);
+  }
+}
+
 export async function reconcileCalendly(tenantId: string, fetcher: typeof fetch = fetch, now = new Date()) {
   const s = await db.tenantSetting.findUnique({ where: { tenantId } });
   if (!s?.calendlyToken || !s.calendlyOrganizationUri) return { skipped: 'not_configured' as const };
   const token = decrypt(s.calendlyToken), org = s.calendlyOrganizationUri;
+  try { await auditCalendlyConnection(tenantId, fetcher, token, org, now); }
+  catch (error) {
+    console.error(JSON.stringify({ event: 'calendly_connection_audit_failed', tenantId, code: error instanceof HttpError ? error.message : 'calendly_connection_audit_failed' }));
+  }
   // Recent past and every future meeting: a booking made today can start weeks from now.
   const minStart = new Date(now.getTime() - 86400000).toISOString();
   const counts = { events: 0, invitees: 0, applied: 0, ignored: 0, duplicates: 0 };
@@ -69,6 +108,7 @@ export async function reconcileCalendly(tenantId: string, fetcher: typeof fetch 
     }
   }
   await db.tenantSetting.update({ where: { tenantId }, data: { calendlyReconciledAt: now } });
+  console.log(JSON.stringify({ event: 'calendly_reconcile', tenantId, ...counts }));
   return counts;
 }
 
@@ -78,7 +118,10 @@ export async function reconcileAllCalendly(now = new Date(), fetcher: typeof fet
   let n = 0;
   for (const t of due) {
     try { await reconcileCalendly(t.tenantId, fetcher, now); n++; }
-    catch { await raiseAlert(t.tenantId, 'calendly_reconcile_failed', now.toISOString().slice(0, 13)); }
+    catch (error) {
+      console.error(JSON.stringify({ event: 'calendly_reconcile_failed', tenantId: t.tenantId, code: error instanceof HttpError ? error.message : 'calendly_reconcile_failed' }));
+      await raiseAlert(t.tenantId, 'calendly_reconcile_failed', now.toISOString().slice(0, 13));
+    }
   }
   return n;
 }

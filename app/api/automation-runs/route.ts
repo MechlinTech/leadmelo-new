@@ -16,7 +16,12 @@ export const POST = endpoint(async req => {
   const key = req.headers.get('idempotency-key');
   if (!key || key.length > 100) throw new HttpError(400, 'idempotency_key_required');
   const idempotencyKey = user.tenantId + ':' + campaignId + ':' + key;
-  const run = await db.automationRun.upsert({
+  const existing = await db.automationRun.findUnique({ where: { idempotencyKey } });
+  // Re-queueing an in-flight run would reset the lease of a worker that is mid-discovery, so a
+  // RUNNING run is returned untouched instead.
+    // A retry must clear the previous error and give the run a full attempt budget, otherwise the
+    // stale failure stays on screen and the claim query (attempts < 3) refuses to pick it up.
+  const run = existing && existing.status === 'RUNNING' ? existing : await db.automationRun.upsert({
     where: { idempotencyKey },
     update: {
       status: 'QUEUED',
@@ -25,6 +30,7 @@ export const POST = endpoint(async req => {
       availableAt: new Date(),
       leaseUntil: null,
       leaseToken: null,
+      startedAt: null,
       finishedAt: null
     },
     create: { tenantId: user.tenantId, campaignId, idempotencyKey }

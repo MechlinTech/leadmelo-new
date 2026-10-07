@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { templateIssue } from './template';
+export { TEMPLATE_VARIABLES } from './template';
 
-export const TEMPLATE_VARIABLES = new Set(['firstName', 'company', 'senderName', 'calendlyUrl', 'offer']);
 const text = z.string().trim().min(1).max(200);
 const list = z.array(text).max(50);
 export const timezone = z.string().refine(value => {
@@ -41,11 +42,8 @@ export const campaignInput = z.object({
   if (steps.some((s, i) => s.stepOrder !== i + 1 || (i > 0 && s.waitBusinessDays < 1))) {
     ctx.addIssue({ code: 'custom', message: 'Use consecutive steps starting at 1; follow-ups need a delay' });
   }
-  const allowed = TEMPLATE_VARIABLES;
   for (const step of steps) {
-    for (const match of (step.subject + step.body).matchAll(/\{\{\s*(\w+)\s*\}\}/g)) {
-      if (!allowed.has(match[1])) ctx.addIssue({ code: 'custom', message: 'Unknown template variable' });
-    }
+    if (templateIssue(step.subject + step.body)) ctx.addIssue({ code: 'custom', message: 'Use supported, complete template placeholders only' });
     if (step.body.includes('[Describe your offer')) ctx.addIssue({ code: 'custom', message: 'Replace the sample offer before saving' });
   }
 });

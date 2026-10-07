@@ -325,10 +325,32 @@ test('Calendly reconciliation recovers missed bookings exactly once and refuses 
     const a = await db.appointment.findMany({ where: { tenantId: T.tenant.id } });
     assert.equal(a.length, 1); assert.equal(a[0].status, 'BOOKED'); assert.equal(a[0].campaignId, campaign.id); assert.equal(a[0].contactId, contact.id);
     assert.ok(calls.every(c => c.auth === 'Bearer calendly-token-abcdefghijklmnop' && c.url.startsWith('https://api.calendly.com/')));
-    assert.match(calls[0].url, /organization=https%3A%2F%2Fapi\.calendly\.com%2Forganizations%2FORG1/); assert.match(calls[0].url, /min_start_time=/);
+    const listed = calls.find(c => c.url.includes('/scheduled_events?'));
+    assert.match(listed.url, /organization=https%3A%2F%2Fapi\.calendly\.com%2Forganizations%2FORG1/); assert.match(listed.url, /min_start_time=/);
     const r2 = await reconcileCalendly(T.tenant.id, fetcher);
     assert.deepEqual([r2.applied, r2.duplicates], [0, 1], 'running again creates nothing');
     assert.equal(await db.appointment.count({ where: { tenantId: T.tenant.id } }), 1);
+  });
+  await t.test('the wrong Calendly user or webhook is reported and the attributed booking is still imported once', async () => {
+    const previousAppUrl = process.env.APP_URL;
+    process.env.APP_URL = 'https://app.example.com';
+    await db.campaign.update({ where: { id: campaign.id }, data: { calendlyUrl: 'https://calendly.com/pm-mechlintech/30min' } });
+    const userUri = 'https://api.calendly.com/users/USER1';
+    const auditing = async (url, init) => {
+      const u = new URL(String(url));
+      if (u.pathname === '/users/me') return Response.json({ resource: { uri: userUri, slug: 'akshat-mechlin' } });
+      if (u.pathname === '/webhook_subscriptions') return Response.json({ collection: [{ state: 'active', events: ['invitee.created'], callback_url: 'https://potentially.example.com/api/calendly/webhook', scope: 'user' }] });
+      return fetcher(url, init);
+    };
+    const before = await db.appointment.count({ where: { tenantId: T.tenant.id } });
+    await reconcileCalendly(T.tenant.id, auditing);
+    assert.equal(await db.appointment.count({ where: { tenantId: T.tenant.id } }), before, 'audit does not create a second meeting');
+    assert.equal(await db.operationalAlert.count({ where: { tenantId: T.tenant.id, code: 'calendly_account_mismatch' } }), 1);
+    assert.equal(await db.operationalAlert.count({ where: { tenantId: T.tenant.id, code: 'calendly_webhook_missing' } }), 1);
+    await reconcileCalendly(T.tenant.id, auditing);
+    assert.equal(await db.appointment.count({ where: { tenantId: T.tenant.id } }), before, 'a second recovery pass stays idempotent');
+    // APP_URL is process-wide; leaving it changed makes every later origin check fail with 403.
+    process.env.APP_URL = previousAppUrl;
   });
   await t.test('a cancellation missed by webhook is recovered', async () => {
     inviteeStatus = 'canceled';

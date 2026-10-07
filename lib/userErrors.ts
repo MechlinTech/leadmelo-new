@@ -30,15 +30,20 @@ const MESSAGES: Record<string, string> = {
   campaign_paused: 'The campaign automation mode is paused.',
   tenant_automation_off: 'Tenant automation is off in Settings.',
   tenant_suspended: 'This tenant is suspended.',
-  gateway_not_configured: 'The provider gateway credential is not configured.',
   gateway_requires_https: 'The provider gateway URL must be HTTPS, or the internal http://gateway address.',
-  integration_or_database_error: 'This automation run failed while talking to the gateway or saving the result. It will retry, then stop after three attempts.',
+  integration_or_database_error: 'This automation run failed unexpectedly. It has been retried and stopped after three attempts. Check the worker logs for the technical detail, then use Run now to try again.',
+  gateway_not_configured: 'No provider gateway URL is configured for this deployment. Set PROVIDER_GATEWAY_URL on the server, then run the campaign again.',
+  gateway_credential_missing: 'This workspace has no provider gateway API key. Add one in Settings, then approve or re-run the message.',
+  gateway_unreachable: 'The provider gateway could not be reached. Check that the gateway service is running and reachable from the app, then run the campaign again.',
+  gateway_timeout: 'The provider gateway did not answer in time. It may be overloaded; the run will retry automatically.',
+  gateway_invalid_response: 'The provider gateway replied with data LeadMelo could not read. Check the gateway logs and its version against docs/PROVIDER_GATEWAY.md.',
   gateway_http_422: 'The discovery gateway rejected the request parameters. Check the campaign ICP targeting and retry.',
   gateway_http_401: 'Authentication to the provider gateway failed. Please verify the gateway API key in Settings.',
   gateway_http_403: 'Access to the provider gateway was forbidden for this tenant.',
   gateway_http_502: 'The discovery provider gateway is unreachable or returned a bad gateway response. Check gateway service status and retry.',
   gateway_http_503: 'The discovery provider gateway is temporarily busy or unavailable. The run will retry automatically.',
   gateway_http_500: 'The discovery provider gateway encountered an internal server error. Please retry or check gateway service logs.',
+  gateway_http_409: 'The provider gateway is not configured for this tenant: it has no vendor (Apollo/Hunter) key or dummy-discovery setting. Add the key in gateway/tenants.json, or enable dummy discovery for testing, then run the campaign again.',
   mail_body_effectively_empty: 'This message was not sent because its body is empty. Add body text to the email step, then approve it again.',
   mail_body_template_empty: 'This message was not sent because its email step has no body text. Add body text to the step, then approve it again.',
   mail_subject_template_empty: 'This message was not sent because its email step has no subject text. Add a subject to the step, then approve it again.',
@@ -46,6 +51,7 @@ const MESSAGES: Record<string, string> = {
   message_changed_since_review: 'The message changed after you reviewed it. Refresh the queue, review the latest content, and approve again.',
   provider_exceeded_limit: 'The discovery provider returned more prospects than permitted by the cap.',
   lease_expired_after_max_attempts: 'The run timed out across maximum retry attempts. Check system health and trigger a new run.',
+  max_attempts_exhausted: 'This run used all three attempts without completing. Fix the cause shown above, then use Run now to queue a fresh run.',
   send_lease_exhausted: 'Email sending timed out across maximum retry attempts.',
   daily_cap: 'Daily email cap reached for this campaign or tenant. Sending will resume in the next send window.',
   postal_address_missing: 'The business postal address is missing in Settings.',
@@ -77,5 +83,7 @@ export function userError(code: unknown): string {
     const status = raw.slice('gateway_http_'.length);
     return MESSAGES[raw] ?? `Provider gateway returned HTTP ${status}. Please check gateway logs and retry.`;
   }
+  // Codes with a curated sentence always win over the underscore-stripped fallback.
+  if (MESSAGES[raw]) return MESSAGES[raw];
   return MESSAGES[raw] ?? raw.replaceAll('_', ' ');
 }
