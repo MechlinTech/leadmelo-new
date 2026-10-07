@@ -31,12 +31,25 @@ export function requireResetEmail(rawEmail: unknown) {
   return parsed.data;
 }
 
-function passwordResetEmail(email: string, resetUrl: string) {
-  return `A password reset was requested for your LeadMelo account (${email}).\n\nSet a new password here (single use, expires in 1 hour):\n${resetUrl}\n\nLeadMelo sign-in page: ${process.env.APP_URL}/auth/signin\n\nIf you did not ask for this, ignore this email: nothing changes until you open the link. Sign in keeps working until then. Never share this link, and never send your password to anyone.`;
+// The recipient's own mailbox only, so this can be tailored per account without leaking
+// anything to anyone else: a first-time sign-in gets "set", an existing one gets "reset".
+function passwordResetEmail(email: string, resetUrl: string, alreadyHasPassword: boolean) {
+  const opening = alreadyHasPassword
+    ? `A password reset was requested for your LeadMelo account (${email}).`
+    : `Your LeadMelo account (${email}) is ready. Set the password to sign in.`;
+  const closing = alreadyHasPassword
+    ? 'If you did not ask for this, ignore this email: nothing changes until you open the link. Your current password keeps working until then.'
+    : 'If you did not expect this, ignore this email and nothing happens.';
+  return `${opening}\n\nSet a new password here (single use, expires in 1 hour):\n${resetUrl}\n\nLeadMelo sign-in page: ${process.env.APP_URL}/auth/signin\n\n${closing}\n\nNever share this link, and never send your password to anyone.`;
 }
 
 // Requests a reset link. `send` is injectable so tests can observe the delivery
 // without touching the Microsoft 365 transport.
+//
+// Every registered account that may sign in gets a link: one that already set a password
+// resets it, and one that never has (provisioned but never finished onboarding) sets its
+// first password. Both consume the same single-use token, so this single path also covers
+// the cases the separate onboarding "resend setup email" flow used to handle.
 //
 // Returns the same shape for every address. A delivery failure is recorded and
 // swallowed rather than reported, because a 502 here would tell an attacker that the
@@ -46,14 +59,15 @@ export async function requestPasswordReset(rawEmail: unknown, now = new Date(), 
   await rateLimit(`password-reset-request:email:${hashToken(email)}`, RESET_REQUESTS_PER_ADDRESS, 60);
 
   const user = await db.user.findUnique({ where: { email }, select: { id: true, tenantId: true, disabled: true, passwordHash: true } });
-  // No account, a disabled account, or one that never set a password (it still uses the
-  // onboarding setup email). All three answer exactly like an unknown address.
-  if (!user || user.disabled || !user.passwordHash) return { ok: true as const, sent: false };
+  // An unknown address and a disabled account both answer exactly like a miss. A disabled
+  // account is deliberately never mailed: it has been deprovisioned, and a reset link could
+  // not sign it in anyway. An administrator re-enables it from Settings first.
+  if (!user || user.disabled) return { ok: true as const, sent: false };
 
   // A fresh link supersedes the previous unused one, so at most one link is ever valid.
   const { resetUrl, expiresAt } = await issueResetLink(user.id, now);
   try {
-    const sent = await send(email, 'Reset your LeadMelo password', passwordResetEmail(email, resetUrl));
+    const sent = await send(email, 'Reset your LeadMelo password', passwordResetEmail(email, resetUrl, Boolean(user.passwordHash)));
     if (!sent) await recordFailure(user, 'm365_not_connected', now);
     else if (user.tenantId) await db.auditEvent.create({ data: { tenantId: user.tenantId, actorUserId: user.id, action: 'password_reset_requested', entityId: user.id, metadata: { expiresAt: expiresAt.toISOString() } } });
     return { ok: true as const, sent: Boolean(sent) };

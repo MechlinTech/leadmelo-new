@@ -4,6 +4,8 @@ import { GraphClient, mimeMessage, connectionInput } from '../lib/m365/graph.ts'
 import { validateDeltaLink } from '../lib/m365/sync.ts';
 import { encrypt } from '../lib/crypto.ts';
 import { classifyReply } from '../lib/replies.ts';
+import { nonBlankEnv } from '../lib/security.ts';
+import { readFileSync } from 'node:fs';
 process.env.DATA_ENCRYPTION_KEY = Buffer.alloc(32,7).toString('base64');
 const config = {directoryId:'11111111-1111-4111-8111-111111111111',clientId:'22222222-2222-4222-8222-222222222222',encryptedSecret:encrypt('test-secret'),mailboxes:['sender@example.com']};
 const message = {tenantId:'tenant',campaignId:'campaign',contactId:'contact',from:'sender@example.com',fromName:'Sender',to:'buyer@example.com',subject:'Hello',body:'Hello buyer',headers:{'List-Unsubscribe':'<https://app.example/unsubscribe?token=test>','List-Unsubscribe-Post':'List-Unsubscribe=One-Click'},calendlyUrl:'https://calendly.com/test'};
@@ -39,4 +41,21 @@ test('connection needs explicit mailbox-scope confirmation and questions do not 
   assert.ok(!connectionInput.safeParse({directoryId:config.directoryId,clientId:config.clientId,clientSecret:'1234567890123456',mailboxes:config.mailboxes}).success);
   assert.equal(classifyReply('yes please send pricing first'),'OBJECTION');
   assert.equal(classifyReply('not interested, what is the price'),'NEGATIVE');
+});
+test('a blank PLATFORM_MAIL_TENANT_ID falls back to the connected mailbox instead of disabling mail',()=>{
+  // Regression: `process.env.X ?? fallback` treats "" as a real value, so a blanked-out
+  // override made sendPlatformNotice return false for every notice. That looked identical
+  // to "no mailbox connected", so password-reset mails were silently never sent.
+  for (const blank of [undefined,'','   ','\t\n']) assert.equal(nonBlankEnv(blank),'',`${JSON.stringify(blank)} must not count as a value`);
+  assert.equal(nonBlankEnv('  tenant-42  '),'tenant-42','a real override is trimmed');
+  const source = readFileSync(new URL('../lib/m365/send.ts', import.meta.url),'utf8');
+  assert.ok(!/PLATFORM_MAIL_TENANT_ID\s*\n?\s*\?\?/.test(source),'no ?? fallback: a blank override must not win');
+  assert.ok(source.includes('nonBlankEnv(process.env.PLATFORM_MAIL_TENANT_ID)'),'the override is read through nonBlankEnv');
+  assert.ok(source.includes('|| (await db.m365Connection.findFirst'),'and then falls back to the connected mailbox');
+});
+test('a blank AI daily limit means the default, not zero allowed calls',()=>{
+  // Same defect class: Number('') is 0, which would block every AI call.
+  for (const blank of [undefined,'','   ']) assert.equal(nonBlankEnv(blank),'');
+  const source = readFileSync(new URL('../lib/ai/features.ts', import.meta.url),'utf8');
+  assert.ok(source.includes('Number(nonBlankEnv(process.env.AI_DAILY_LIMIT)) || 200'),'blank falls back to the default of 200');
 });

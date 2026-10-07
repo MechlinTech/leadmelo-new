@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { db } from '../db';
+import { nonBlankEnv } from '../security';
 import { GraphClient, MailInput, emailBodyContentType, mailInput, mailboxPath, mimeMessage } from './graph';
 
 // Logs identify a recipient without disclosing the address.
@@ -24,12 +25,14 @@ export async function sendWorkspaceNotice(tenantId: string, to: string, subject:
   return true;
 }
 
-// Platform notices (access-request confirmations, account-ready mail) are delivered from the
-// first connected Microsoft 365 mailbox on this installation, or PLATFORM_MAIL_TENANT_ID's.
-// `send` is injectable so tests can stub the remote side effect.
+// Platform notices (access-request confirmations, account-ready mail, password-reset links)
+// are delivered from the first connected Microsoft 365 mailbox on this installation, or
+// PLATFORM_MAIL_TENANT_ID's. `send` is injectable so tests can stub the remote side effect.
 export async function sendPlatformNotice(to: string, subject: string, text: string, send: typeof sendWorkspaceNotice = sendWorkspaceNotice) {
-  const tenantId = process.env.PLATFORM_MAIL_TENANT_ID
-    ?? (await db.m365Connection.findFirst({ where: { enabled: true }, select: { tenantId: true } }))?.tenantId;
+  // nonBlankEnv, not ??: an empty PLATFORM_MAIL_TENANT_ID must fall back to the connected
+  // mailbox, not disable every notice and look like "no mailbox configured".
+  const tenantId = nonBlankEnv(process.env.PLATFORM_MAIL_TENANT_ID)
+    || (await db.m365Connection.findFirst({ where: { enabled: true }, select: { tenantId: true } }))?.tenantId;
   if (!tenantId) return false;
   return send(tenantId, to, subject, text);
 }

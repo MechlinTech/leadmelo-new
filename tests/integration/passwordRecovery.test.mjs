@@ -141,13 +141,28 @@ test('self-service forgot password: generic answers, secure links, and a working
     assert.equal((await resetPassword(req('auth/reset', 'POST', { token: 'f'.repeat(64), password: fresh }))).status, 400, 'an unknown token is refused');
   });
 
-  await t.test('disabled and passwordless accounts answer exactly like an unknown address', async () => {
-    const disabled = await mkUser('off', { disabled: true });
+  await t.test('every registered account is covered: a passwordless one gets its first password', async () => {
+    // Provisioned but never finished onboarding: passwordHash is null, so it cannot sign in
+    // yet. It must still be able to recover through "Forgot password?" on its own.
     const pending = await mkUser('pending', { passwordHash: null });
     const { sent, send } = capture();
-    for (const user of [disabled, pending]) assert.deepEqual(await requestPasswordReset(user.email, new Date(), send), { ok: true, sent: false });
-    assert.deepEqual(sent, [], 'no reset mail for accounts that must not sign in yet');
-    assert.equal(await db.passwordReset.count({ where: { userId: { in: [disabled.user.id, pending.user.id] } } }), 0, 'no reset token is minted for them');
+    assert.deepEqual(await requestPasswordReset(pending.email, new Date(), send), { ok: true, sent: true }, 'the link is sent');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].to, pending.email);
+    assert.match(sent[0].text, /is ready/, 'a first-time account is told to set its password');
+    assert.ok(sent[0].text.includes(`${process.env.APP_URL}/auth/reset?token=`), 'the link uses the app URL');
+    const link = linkIn(sent[0].text);
+    assert.equal((await resetPassword(req('auth/reset', 'POST', { token: link, password: fresh }))).status, 200, 'the link sets the first password');
+    assert.equal((await doLogin(pending.email, fresh)).status, 200, 'and the account can then sign in');
+    assert.ok((await db.user.findUniqueOrThrow({ where: { id: pending.user.id } })).passwordHash, 'a password now exists');
+  });
+
+  await t.test('a disabled account is never mailed and answers like an unknown address', async () => {
+    const disabled = await mkUser('off', { disabled: true });
+    const { sent, send } = capture();
+    assert.deepEqual(await requestPasswordReset(disabled.email, new Date(), send), { ok: true, sent: false });
+    assert.deepEqual(sent, [], 'a deprovisioned account is not emailed');
+    assert.equal(await db.passwordReset.count({ where: { userId: disabled.user.id } }), 0, 'no reset token is minted for it');
   });
 
   await t.test('a delivery failure is swallowed and never becomes an account hint', async () => {

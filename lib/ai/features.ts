@@ -2,13 +2,15 @@ import { z } from 'zod';
 import { db } from '../db';
 import { decrypt } from '../crypto';
 import { HttpError } from '../http';
+import { nonBlankEnv } from '../security';
 import { TEMPLATE_VARIABLES, icpInput } from '../validation';
 import { classifyReplyDetailed, type ReplyIntentName } from '../replies';
 import { chat, extractJson, checkAiUrl, explainAiSetup, type AiConfig, type ChatMessage } from './client';
 
 export const AI_FEATURES = ['campaign_assist', 'reply_assist'] as const;
 export type AiFeature = typeof AI_FEATURES[number];
-export const AI_DAILY_LIMIT = () => Number(process.env.AI_DAILY_LIMIT ?? 200);
+// A blank value means "unset", not zero: Number('') is 0, which would block every AI call.
+export const AI_DAILY_LIMIT = () => Number(nonBlankEnv(process.env.AI_DAILY_LIMIT)) || 200;
 
 export type Fetcher = typeof fetch;
 
