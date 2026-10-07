@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { db } from '../../../lib/db';
 import { authenticate } from '../../../lib/auth';
 import { endpoint, HttpError, jsonBody } from '../../../lib/http';
@@ -17,11 +18,12 @@ export const PUT = endpoint(async req => {
   if (!['TENANT_ADMIN', 'SUPER_ADMIN'].includes(user.role)) throw new HttpError(403, 'admin_required');
   const parsed = settingsInput.parse(await jsonBody(req));
   const { companyName, ...body } = parsed;
+  if (body.aiModel?.includes('@')) throw new HttpError(400, 'ai_model_is_email');
   if (body.aiBaseUrl) { const bad = checkAiUrl(body.aiBaseUrl); if (bad) throw new HttpError(400, `ai_url_rejected: ${bad}`); }
   if (body.aiEnabled && !(body.aiBaseUrl ?? (await db.tenantSetting.findUnique({ where: { tenantId: user.tenantId } }))?.aiBaseUrl)) throw new HttpError(400, 'ai_url_required');
-  const data = { ...body, aiKey: body.aiKey ? encrypt(body.aiKey) : undefined, gatewayKey: body.gatewayKey ? encrypt(body.gatewayKey) : undefined, webhookSecret: body.webhookSecret ? encrypt(body.webhookSecret) : undefined, calendlySigningKey: body.calendlySigningKey ? encrypt(body.calendlySigningKey) : undefined, calendlyToken: body.calendlyToken ? encrypt(body.calendlyToken) : undefined };
+  const data = Object.fromEntries(Object.entries({ ...body, aiKey: body.aiKey ? encrypt(body.aiKey) : undefined, gatewayKey: body.gatewayKey ? encrypt(body.gatewayKey) : undefined, webhookSecret: body.webhookSecret ? encrypt(body.webhookSecret) : undefined, calendlySigningKey: body.calendlySigningKey ? encrypt(body.calendlySigningKey) : undefined, calendlyToken: body.calendlyToken ? encrypt(body.calendlyToken) : undefined }).filter(([, value]) => value !== undefined)) as Prisma.TenantSettingUncheckedUpdateInput;
   if (companyName) await db.tenant.update({ where: { id: user.tenantId }, data: { name: companyName } });
-  await db.tenantSetting.upsert({ where: { tenantId: user.tenantId }, update: data, create: { ...data, tenantId: user.tenantId } });
+  await db.tenantSetting.upsert({ where: { tenantId: user.tenantId }, update: data, create: { ...data, tenantId: user.tenantId, postalAddress: body.postalAddress } as Prisma.TenantSettingUncheckedCreateInput });
   await db.auditEvent.create({ data: { tenantId: user.tenantId, actorUserId: user.id, action: 'settings_updated' } });
   return Response.json({ ok: true });
 });

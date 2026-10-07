@@ -34,14 +34,20 @@ export async function exportSubjectData(tenantId: string, actor: { id: string; r
 
 // Erasure keeps ONE minimal record: the suppression row, so the person is never contacted again.
 // Idempotent, and safe for an address we hold nothing on (it then only suppresses).
-export async function eraseSubject(tenantId: string, actorUserId: string | null, rawEmail: string) {
+export async function eraseSubject(tenantId: string, actorUserId: string | null, rawEmail: string, requireMatch = false) {
   const email = normalizeEmail(rawEmail);
   return db.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id=${tenantId} FOR UPDATE`;
+    const counts = { found: false, contact: 0, replies: 0, messages: 0, appointments: 0, leads: 0 };
+    const contact = await tx.contact.findUnique({ where: { tenantId_email: { tenantId, email } } });
+    const leadMatches = await tx.lead.count({ where: { tenantId, contactEmail: email } });
+    if (requireMatch && !contact && leadMatches === 0) {
+      await tx.auditEvent.create({ data: { tenantId, actorUserId, action: 'privacy_erasure', metadata: { emailHash: emailHash(email), counts, found: false } } });
+      return counts;
+    }
+    counts.found = true;
     await tx.suppression.upsert({ where: { tenantId_email: { tenantId, email } }, update: { reason: 'erasure_request' }, create: { tenantId, email, reason: 'erasure_request' } });
     await suppress(tx, tenantId, email, 'erasure_request'); // stops enrollments and cancels queued sends
-    const counts = { contact: 0, replies: 0, messages: 0, appointments: 0, leads: 0 };
-    const contact = await tx.contact.findUnique({ where: { tenantId_email: { tenantId, email } } });
     if (contact) {
       counts.replies = (await tx.reply.deleteMany({ where: { tenantId, contactId: contact.id } })).count;
       counts.messages = (await tx.outreachEvent.updateMany({ where: { tenantId, contactId: contact.id }, data: { subject: null, body: null, contactId: null } })).count;

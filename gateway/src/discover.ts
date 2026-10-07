@@ -10,6 +10,12 @@ import { apolloEmployeeRanges, apolloLocation, geographyFor, industryFor, looksL
 export type IcpInput = { industries: string[]; companySizes: string[]; geographies: string[]; technologies: string[]; buyingSignals: string[]; buyerTitles: string[]; exclusionRules: string[] };
 const clip = (s: string, n = 200) => s.slice(0, n);
 const hash = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 16);
+// Until a Hunter key is configured, accept only a mailbox Apollo itself marks verified.
+function apolloMailbox(emailStatus: string | null): { verification: 'VALID' | 'RISKY'; vendorStatus: string } {
+  return (emailStatus ?? '').toLowerCase() === 'verified'
+    ? { verification: 'VALID', vendorStatus: 'Apollo (verified)' }
+    : { verification: 'RISKY', vendorStatus: 'Apollo (not verified)' };
+}
 
 // Search (free) -> pre-filter on title (free) -> enrich (spends a credit) -> independent verification.
 // Only prospects with a Hunter-verified VALID mailbox, a provable "hiring" evidence link and an
@@ -17,7 +23,7 @@ const hash = (s: string) => createHash('sha256').update(s).digest('hex').slice(0
 //  * a "Hiring X" signal is claimed only for candidates returned by a search filtered on job title X;
 //  * a technology is claimed only if Apollo lists it in the organization's current technologies.
 export async function discover(
-  deps: { apollo: ApolloClient; hunter: HunterClient; store: GatewayStore; config: GatewayConfig; now?: () => Date },
+  deps: { apollo: ApolloClient; hunter: HunterClient | null; store: GatewayStore; config: GatewayConfig; now?: () => Date },
   req: { tenantId: string; campaignId: string; icp: IcpInput; limit: number }
 ): Promise<{ prospects: Prospect[] }> {
   const { apollo, hunter, store, config } = deps, now = deps.now ?? (() => new Date());
@@ -57,8 +63,9 @@ export async function discover(
           const evidenceUrl = [org.website, org.linkedin].find(u => u && /^https?:\/\//i.test(u) && URL.canParse(u));
           const title = titleFor(e.title, icp.buyerTitles, config.taxonomy.titles);
           if (!looksLikeDomain(domain) || !evidenceUrl || !title.matched || !e.fullName || emails.has(e.email.toLowerCase())) continue;
-          const check = await hunter.verify(e.email);
+          const check = hunter ? await hunter.verify(e.email) : apolloMailbox(e.emailStatus);
           if (check.verification !== 'VALID') continue;
+          const verifiedBy = hunter ? `Hunter (${check.vendorStatus})` : check.vendorStatus;
           const techSet = new Set(org.technologies.map(t => t.toLowerCase()));
           const technologies = icp.technologies.filter(t => techSet.has(t.toLowerCase()) || techSet.has(technologyUid(t)));
           const parsed = prospectSchema.safeParse({
@@ -66,7 +73,7 @@ export async function discover(
             industry: clip(industryFor(org.industry, icp.industries, config.taxonomy.industries)), companySize: clip(sizeBandFor(org.employees, icp.companySizes)),
             geography: clip(geographyFor(e.country, icp.geographies)), technologies, signals: [signal],
             verification: 'VALID', verifiedAt: now().toISOString(), evidenceUrl,
-            evidenceSummary: clip(`Apollo lists ${clip(org.name ?? domain, 80)} as having an open job posting matching "${jobTitle}" (Apollo search filter q_organization_job_titles; not independently confirmed). Mailbox verified by Hunter (${check.vendorStatus}).`, 1000)
+            evidenceSummary: clip(`Apollo lists ${clip(org.name ?? domain, 80)} as having an open job posting matching "${jobTitle}" (Apollo search filter q_organization_job_titles; not independently confirmed). Mailbox verified by ${verifiedBy}.`, 1000)
           });
           if (parsed.success) { prospects.push(parsed.data); emails.add(parsed.data.email); }
         }

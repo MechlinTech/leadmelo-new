@@ -19,10 +19,10 @@ export const POST = endpoint(async req => {
   const existing = await db.automationRun.findUnique({ where: { idempotencyKey } });
   // Re-queueing an in-flight run would reset the lease of a worker that is mid-discovery, so a
   // RUNNING run is returned untouched instead.
-  const run = existing && existing.status === 'RUNNING' ? existing : await db.automationRun.upsert({
-    where: { idempotencyKey },
     // A retry must clear the previous error and give the run a full attempt budget, otherwise the
     // stale failure stays on screen and the claim query (attempts < 3) refuses to pick it up.
+  const run = existing && existing.status === 'RUNNING' ? existing : await db.automationRun.upsert({
+    where: { idempotencyKey },
     update: {
       status: 'QUEUED',
       errors: Prisma.DbNull,

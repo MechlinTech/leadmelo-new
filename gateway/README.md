@@ -39,6 +39,12 @@ Reliability: results are stored per `Idempotency-Key` (same key + same request r
 | `GATEWAY_DISCOVERY_DEADLINE_MS` | 90000 | stop a discovery job after this long, returning what it has |
 | `GATEWAY_MAX_ENRICH_PER_REQUEST` | 60 | credit budget per request (also capped at 4 x limit) |
 | `GATEWAY_MAX_PAGES` | 3 | search pages per job |
+| `GATEWAY_DUMMY_DISCOVERY` | false | when `true`/`on`/`1`, `POST /discover` returns synthetic prospects and never calls Apollo |
+| `GATEWAY_DUMMY_EMAILS` | empty | comma/space-separated emails used as dummy leads (required when dummy discovery is on); each address becomes one prospect |
+
+### Dummy discovery (dev/test only)
+
+Use this to exercise LeadMelo’s campaign → enrollment → outreach path without spending Apollo credits. Prospects are built from `GATEWAY_DUMMY_EMAILS` using the request ICP’s first industry, size band, geography, buyer title and `Hiring <role>` signal so they still pass LeadMelo qualification. Already-returned emails are remembered per tenant+campaign (same as enrich “seen” markers). Turn it off for any run that should hit Apollo.
 
 ## Assumptions that must be confirmed live (any of these may be wrong)
 

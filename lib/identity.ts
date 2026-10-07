@@ -7,7 +7,7 @@ import { hashPassword, verifyPassword, encrypt, decrypt } from './crypto';
 import { newTotpSecret, otpauthUri, verifyTotp } from './totp';
 import { assertCanAddSeat } from './entitlements';
 
-export const passwordSchema = z.string().min(12).max(256);
+export const passwordSchema = z.string().min(12).max(256).refine(value => /\S/.test(value) && value.trim().length >= 12, 'password_blank');
 export const INVITE_ROLES = ['TENANT_ADMIN', 'MANAGER', 'MEMBER'] as const;
 const isAdmin = (role: string) => role === 'TENANT_ADMIN' || role === 'SUPER_ADMIN';
 const newToken = () => randomBytes(32).toString('hex');

@@ -83,10 +83,10 @@ test('Apollo client: documented request shape, no personal-data reveal, tolerant
 });
 
 // ---- Full path: LeadMelo's real gateway client -> gateway server -> mocked vendors ----
-const BEARER = 'tenant-one-bearer-token-123456', OTHER_BEARER = 'tenant-two-bearer-token-654321', WRONG = 'not-a-configured-token-999999';
+const BEARER = 'tenant-one-bearer-token-123456', OTHER_BEARER = 'tenant-two-bearer-token-654321', NO_APOLLO = 'tenant-without-apollo-key-00000', WRONG = 'not-a-configured-token-999999';
 const icp = { name: 'QA', industries: ['SaaS'], companySizes: ['50-1000'], geographies: ['US'], technologies: ['Playwright'], buyingSignals: ['Hiring QA'], buyerTitles: ['CTO'], exclusionRules: [], minScore: 75 };
 const people = {
-  p1: { id: 'p1', name: 'Alex Example', title: 'Chief Technology Officer', email: 'alex@buyer1.example', country: 'United States', organization: { name: 'Buyer One', primary_domain: 'buyer1.example', website_url: 'https://buyer1.example', industry: 'computer software', estimated_num_employees: 120, current_technologies: [{ uid: 'playwright', name: 'Playwright' }] } },
+  p1: { id: 'p1', name: 'Alex Example', title: 'Chief Technology Officer', email: 'alex@buyer1.example', email_status: 'verified', country: 'United States', organization: { name: 'Buyer One', primary_domain: 'buyer1.example', website_url: 'https://buyer1.example', industry: 'computer software', estimated_num_employees: 120, current_technologies: [{ uid: 'playwright', name: 'Playwright' }] } },
   p3: { id: 'p3', name: 'Casey Catchall', title: 'CTO', email: 'cto@buyer2.example', country: 'United States', organization: { name: 'Buyer Two', primary_domain: 'buyer2.example', website_url: 'https://buyer2.example', industry: 'computer software', estimated_num_employees: 300 } },
   p4: { id: 'p4', name: 'No Evidence', title: 'CTO', email: 'cto@buyer3.example', country: 'United States', organization: { name: 'Buyer Three', primary_domain: 'buyer3.example', industry: 'computer software', estimated_num_employees: 90 } },
   p5: { id: 'p5', name: 'Nina Next', title: 'CTO', email: 'nina@buyer4.example', country: 'United States', organization: { name: 'Buyer Four', primary_domain: 'buyer4.example', website_url: 'https://buyer4.example', industry: 'computer software', estimated_num_employees: 500 } }
@@ -114,8 +114,8 @@ function vendors(opts = {}) {
 }
 async function start(fetcher, overrides = {}) {
   const config = {
-    tenants: new Map([[sha(BEARER), { tenantId: 't1', apolloKey: 'apollo-key-123', hunterKey: 'hunter-key-123' }], [sha(OTHER_BEARER), { tenantId: 't2', apolloKey: 'apollo-key-456' }]]),
-    taxonomy: { industries: { 'computer software': 'SaaS' }, titles: {} }, syncWaitMs: 5000, discoveryDeadlineMs: 30000, maxEnrichPerRequest: 60, maxPages: 3, ...overrides
+    tenants: new Map([[sha(BEARER), { tenantId: 't1', apolloKey: 'apollo-key-123', hunterKey: 'hunter-key-123' }], [sha(OTHER_BEARER), { tenantId: 't2', apolloKey: 'apollo-key-456' }], [sha(NO_APOLLO), { tenantId: 't3' }]]),
+    taxonomy: { industries: { 'computer software': 'SaaS' }, titles: {} }, syncWaitMs: 5000, discoveryDeadlineMs: 30000, maxEnrichPerRequest: 60, maxPages: 3, dummyDiscovery: false, dummyEmails: [], ...overrides
   };
   const server = createGatewayServer(config, { fetcher, store: new GatewayStore() });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -171,7 +171,7 @@ test('discovery end to end: contract-valid, ICP-qualifying, evidence-backed and 
       const before = v.calls.length;
       await assert.rejects(discover(WRONG, 'discover-key-0003', request()), /gateway_http_401/);
       await assert.rejects(discover(BEARER, 'discover-key-0003', request('t2')), /gateway_http_403/, 'body tenant must equal the credential\'s tenant');
-      await assert.rejects(discover(OTHER_BEARER, 'discover-key-0003', request('t2')), /gateway_http_409/, 'tenant without a Hunter key cannot discover');
+      await assert.rejects(discover(NO_APOLLO, 'discover-key-0003', request('t3')), /gateway_http_409/, 'tenant without an Apollo key cannot discover');
       await assert.rejects(discover(BEARER, 'discover-key-0004', request('t1', { icp: { ...icp, buyingSignals: ['Raised Series B'] } })), /gateway_http_422/, 'unsupported signals fail before spending');
       await assert.rejects(discover(BEARER, 'x', request()), /gateway_http_400/, 'idempotency key required');
       assert.deepEqual((await discover(BEARER, 'discover-key-0005', request('t1', { limit: 0 }))).prospects, []);
@@ -225,6 +225,17 @@ test('vendor failures: rate limits are retryable, partial results survive, slow 
   });
 });
 
+test('apollo-only discovery uses Apollo verified email status and does not call Hunter', async () => {
+  const v = vendors();
+  const g = await start(v.fetcher, { tenants: new Map([[sha(OTHER_BEARER), { tenantId: 't2', apolloKey: 'apollo-key-456' }]]) });
+  try {
+    const r = await discover(OTHER_BEARER, 'apollo-only-key-0001', request('t2', { limit: 1 }));
+    assert.equal(r.prospects[0].email, 'alex@buyer1.example');
+    assert.match(r.prospects[0].evidenceSummary, /Apollo \(verified\)/);
+    assert.equal(v.count('api.hunter.io'), 0);
+  } finally { await g.stop(); }
+});
+
 test('verification: definitive answers are remembered, UNKNOWN stays retryable, tenant is bound', async () => {
   const v = vendors(); const g = await start(v.fetcher);
   try {
@@ -240,5 +251,36 @@ test('verification: definitive answers are remembered, UNKNOWN stays retryable, 
     assert.equal(v.count('api.hunter.io'), 3, 'UNKNOWN was re-checked, not frozen');
     await assert.rejects(verify('verify-key-0003', { tenantId: 't2', contactId: 'ct3', email: 'a@b.example' }), /gateway_http_403/);
     await assert.rejects(verify('verify-key-0004', { tenantId: 't2', contactId: 'ct3', email: 'a@b.example' }, OTHER_BEARER), /gateway_http_409/);
+  } finally { await g.stop(); }
+});
+
+test('dummy discovery returns configured emails without calling Apollo and still ICP-qualifies', async () => {
+  const v = vendors();
+  const g = await start(v.fetcher, {
+    dummyDiscovery: true,
+    dummyEmails: ['alice.tester@buyer1.example', 'bob.tester@buyer2.example', 'not-an-email', 'alice.tester@buyer1.example']
+  });
+  try {
+    const r = await discover(NO_APOLLO, 'dummy-key-0001', request('t3', { limit: 10 }));
+    assert.equal(r.prospects.length, 2);
+    assert.deepEqual(r.prospects.map(p => p.email), ['alice.tester@buyer1.example', 'bob.tester@buyer2.example']);
+    assert.equal(v.count('api.apollo.io'), 0, 'Apollo is never called in dummy mode');
+    assert.equal(v.count('api.hunter.io'), 0, 'Hunter is never called in dummy mode');
+    for (const p of r.prospects) {
+      assert.equal(p.verification, 'VALID');
+      assert.equal(p.title, 'CTO');
+      assert.equal(p.industry, 'SaaS');
+      assert.deepEqual(p.signals, ['Hiring QA']);
+      assert.equal(qualifyProspect(icp, p).eligible, true);
+    }
+    // QA intent: dummy mode always returns the same canned prospects on every discover so a
+    // campaign can be re-activated and re-enrolled without rotating inboxes. The gateway-level
+    // "seen" marker must therefore not suppress them.
+    const again = await discover(NO_APOLLO, 'dummy-key-0002', request('t3', { limit: 10 }));
+    assert.deepEqual(again.prospects.map(p => p.email), ['alice.tester@buyer1.example', 'bob.tester@buyer2.example'], 'dummy emails are returned again on a new discover key');
+    // Replaying the same idempotency key must return the identical stored response.
+    const repeat = await discover(NO_APOLLO, 'dummy-key-0001', request('t3', { limit: 10 }));
+    assert.deepEqual(repeat.prospects, r.prospects, 'a repeated idempotency key replays the stored response');
+    assert.equal(v.count('api.apollo.io'), 0, 'Apollo is still never called in dummy mode');
   } finally { await g.stop(); }
 });

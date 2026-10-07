@@ -1,11 +1,8 @@
 node_modules/
 .next/
-.env.dev
-.env.prod
-.env.dev.example
-.env.prod.example
+.env
+.env.*
 !.env.example
-!.env.*.example
 *.tsbuildinfo
 *.log
 *.dump
@@ -14,7 +11,8 @@ node_modules/
 test-results/
 playwright-report/
 coverage/
-branch_structure.json
-temp_auto_push.bat
-temp_interactive_push.bat
-config.bat
+.vscode/
+# Scratch scripts under scripts/_ often embed live keys while debugging.
+scripts/_*
+# Per-environment gateway tenant bindings and vendor keys. Never shared.
+gateway-config/

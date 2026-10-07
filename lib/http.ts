@@ -28,7 +28,7 @@ export function endpoint(fn: (req: Request) => Promise<Response>) {
     } catch (error) {
       let status = 500, message = 'internal_error';
       if (error instanceof HttpError) { status = error.status; message = error.message; }
-      else if (error instanceof ZodError) { status = 400; message = 'invalid_request'; }
+      else if (error instanceof ZodError || (error instanceof Error && error.name === 'ZodError')) { status = 400; message = 'invalid_request'; }
       else if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         status = 409; message = 'already_exists';
       } else console.error(JSON.stringify({ event: 'request_failed', errorType: error instanceof Error ? error.name : 'unknown', code: error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined }));

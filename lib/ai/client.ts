@@ -31,6 +31,18 @@ export function checkAiUrl(raw: string, env: NodeJS.ProcessEnv = process.env): s
   return null;
 }
 
+// OpenAI rejects a short or non-sk key with 401, and a model field that holds an email never names a model.
+export function explainAiSetup(baseUrl: string, model: string, apiKey?: string): string | null {
+  if (model.includes('@')) return 'ai_model_is_email';
+  let host = '';
+  try { host = new URL(baseUrl).hostname.toLowerCase(); } catch { return null; }
+  if (host !== 'api.openai.com') return null;
+  const key = apiKey?.trim() ?? '';
+  if (!key) return 'ai_key_required';
+  if (!key.startsWith('sk-') || key.length < 40) return 'ai_openai_key_invalid';
+  return null;
+}
+
 export const MAX_RESPONSE_BYTES = 200_000;
 
 export async function chat(cfg: AiConfig, messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number; timeoutMs?: number; fetcher?: typeof fetch } = {}): Promise<string> {

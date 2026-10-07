@@ -4,7 +4,7 @@ import { PLANS, PUBLIC_PLAN_ORDER, type PlanId } from '../lib/plans';
 import { api } from './api';
 
 type Tenant = { id: string; name: string; slug: string; plan: PlanId; createdAt: string; settings: { suspended: boolean; automationEnabled: boolean } | null; _count: { users: number; campaigns: number } };
-type Request = { id: string; name: string; email: string; company: string | null; message: string | null; plan: string | null; source: string; handledAt: string | null; createdAt: string };
+type Request = { id: string; name: string; email: string; company: string | null; message: string | null; plan: string | null; source: string; status: string; emailError: string | null; lastEmailAt: string | null; handledAt: string | null; createdAt: string };
 type Question = { id: string; question: string; audience: string; createdAt: string };
 
 export default function OperatorConsole() {
@@ -28,9 +28,13 @@ export default function OperatorConsole() {
     </section>
     <section aria-labelledby="requests-title"><h2 id="requests-title">Access requests</h2>
       {data.requests.length === 0 ? <p className="muted">No requests yet.</p> : <ul className="recordList">{data.requests.map(r => <li key={r.id}>
-        <div className="toolbar"><strong>{r.name}</strong><span className="pill">{r.handledAt ? 'handled' : 'new'}</span></div>
+        <div className="toolbar"><strong>{r.name}</strong><span className="pill">{r.status === 'APPROVED' ? 'approved' : (r.handledAt ? 'handled' : 'new')}</span></div>
         <p>{r.email}{r.company ? ` · ${r.company}` : ''}{r.plan ? ` · interested in ${r.plan.toLowerCase()}` : ''} · via {r.source}</p>{r.message && <p className="muted">{r.message}</p>}
-        <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api('admin/overview', 'PATCH', { id: r.id, handled: !r.handledAt }))}>{r.handledAt ? 'Reopen' : 'Mark handled'}</button></li>)}</ul>}
+        {r.emailError && <p role="alert" className="error">Last email attempt failed: {r.emailError}. The user can also request a new setup email.</p>}
+        {r.status === 'APPROVED'
+          ? <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api('admin/overview', 'PATCH', { id: r.id, handled: !r.handledAt }))}>{r.handledAt ? 'Reopen' : 'Mark handled'}</button>
+          : <><button type="button" disabled={busy} onClick={() => void run(() => api(`admin/access-requests/${r.id}/approve`, 'POST'))}>Approve &amp; create account</button>
+             <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api('admin/overview', 'PATCH', { id: r.id, handled: !r.handledAt }))}>{r.handledAt ? 'Reopen' : 'Mark handled'}</button></>}</li>)}</ul>}
     </section>
     <section aria-labelledby="questions-title"><h2 id="questions-title">Questions the assistant could not answer</h2>
       <p className="muted">Use these to extend <code>lib/assistant/knowledge.ts</code>. Emails and numbers are masked.</p>

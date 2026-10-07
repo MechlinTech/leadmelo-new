@@ -65,7 +65,14 @@ export const PATCH = endpoint(async req => {
     const appointment = await db.appointment.findFirst({ where: { id: body.id, tenantId: user.tenantId, status: 'BOOKED' }, include: { campaign: true } });
     if (!appointment?.campaign || !appointment.contactId) throw new HttpError(404, 'booked_appointment_not_found');
     const enrollment = await db.enrollment.findUnique({ where: { campaignId_contactId: { campaignId: appointment.campaign.id, contactId: appointment.contactId } } });
-    if (!enrollment || !enrollment.hasBuyer || !enrollment.hasPainSignal || enrollment.score < appointment.campaign.minAppointmentQualityScore) throw new HttpError(409, 'qualification_requirements_not_met');
+    const missing: string[] = [];
+    if (!enrollment) missing.push('this buyer is not enrolled on the campaign');
+    else {
+      if (!enrollment.hasBuyer) missing.push('buyer role is not confirmed');
+      if (!enrollment.hasPainSignal) missing.push('a buying signal is not confirmed');
+      if (enrollment.score < appointment.campaign.minAppointmentQualityScore) missing.push(`fit score ${enrollment.score} is below the required ${appointment.campaign.minAppointmentQualityScore}`);
+    }
+    if (missing.length) throw new HttpError(409, `qualification_requirements_not_met:${missing.join(',')}`);
     await db.appointment.update({ where: { id: appointment.id }, data: { qualified: true, qualificationNotes: body.outcomeReason } });
     await db.auditEvent.create({ data: { tenantId: user.tenantId, actorUserId: user.id, action: 'appointment_qualified', entityId: body.id } });
     return Response.json({ ok: true });

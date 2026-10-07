@@ -4,6 +4,33 @@ import { GraphClient, MailInput, mailboxPath, mimeMessage } from './graph';
 
 // Every state transition is committed BEFORE a remote side effect. An uncertain send
 // can be read/reconciled but never automatically submitted a second time.
+// One workspace notice from the first connected mailbox. Returns false when Microsoft is not connected.
+export async function sendWorkspaceNotice(tenantId: string, to: string, subject: string, text: string) {
+  const config = await db.m365Connection.findUnique({ where: { tenantId } });
+  const from = config?.enabled ? config.mailboxes[0] : undefined;
+  if (!from || /[\r\n]/.test(to) || /[\r\n]/.test(subject)) return false;
+  const graph = new GraphClient(config!);
+  await graph.request(`${mailboxPath(from)}/sendMail`, 'POST', JSON.stringify({
+    message: {
+      subject,
+      body: { contentType: 'Text', content: text },
+      toRecipients: [{ emailAddress: { address: to } }]
+    },
+    saveToSentItems: true
+  }));
+  return true;
+}
+
+// Platform notices (access-request confirmations, account-ready mail) are delivered from the
+// first connected Microsoft 365 mailbox on this installation, or PLATFORM_MAIL_TENANT_ID's.
+// `send` is injectable so tests can stub the remote side effect.
+export async function sendPlatformNotice(to: string, subject: string, text: string, send: typeof sendWorkspaceNotice = sendWorkspaceNotice) {
+  const tenantId = process.env.PLATFORM_MAIL_TENANT_ID
+    ?? (await db.m365Connection.findFirst({ where: { enabled: true }, select: { tenantId: true } }))?.tenantId;
+  if (!tenantId) return false;
+  return send(tenantId, to, subject, text);
+}
+
 export async function sendMicrosoft(tenantId: string, key: string, input: MailInput, client?: GraphClient) {
   const config = await db.m365Connection.findUnique({where:{tenantId}});
   if (!config?.enabled || input.tenantId !== tenantId || !config.mailboxes.includes(input.from)) throw new Error('m365_sender_not_allowed');
