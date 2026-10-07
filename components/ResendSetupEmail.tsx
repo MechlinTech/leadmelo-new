@@ -4,7 +4,7 @@ import { api } from './api';
 
 // Resend the one-time setup email. The answer is deliberately generic: it never reveals
 // whether an address has an account. Delivery failures are surfaced, never swallowed.
-export default function ResendSetupEmail() {
+export default function ResendSetupEmail({ isStandalone }: { isStandalone?: boolean } = {}) {
   const [state, setState] = useState<'idle' | 'busy' | 'sent' | 'failed'>('idle'), [error, setError] = useState('');
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setError(''); setState('busy');
@@ -18,10 +18,11 @@ export default function ResendSetupEmail() {
       else { setState('sent'); }
     }
   }
-  return <section className="form" style={{ marginTop: 24 }}><h2>Link expired or already used?</h2>
+  return <section className={isStandalone ? "" : "form"} style={isStandalone ? {} : { marginTop: 24 }}>
+    {!isStandalone && <h2>Link expired or already used?</h2>}
     <p className="muted">Enter the email you registered with. If your access has been granted, we will send a new secure setup link.</p>
     {state === 'sent' && <p role="status">If your address is registered and approved, a new setup email is on its way. Please check your inbox (and spam folder).</p>}
     {state === 'failed' && <p role="alert" className="error">{error}</p>}
-    <form onSubmit={submit} noValidate={false}><label>Registered email<input name="email" type="email" required maxLength={254} autoComplete="email"/></label><button disabled={state === 'busy'}>{state === 'busy' ? 'Sending…' : 'Resend setup email'}</button></form>
+    <form onSubmit={submit} className="editor" noValidate={false}><label>Registered email<input name="email" type="email" required maxLength={254} autoComplete="email"/></label><button disabled={state === 'busy'}>{state === 'busy' ? 'Sending…' : isStandalone ? 'Send reset link' : 'Resend setup email'}</button></form>
   </section>;
 }

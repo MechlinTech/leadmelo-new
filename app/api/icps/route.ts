@@ -13,10 +13,23 @@ export const POST = endpoint(async req => {
   if (raw.duplicateFrom) {
     const src = await db.iCP.findFirst({ where: { id: String(raw.duplicateFrom), tenantId: user.tenantId } });
     if (!src) throw new HttpError(404, 'icp_not_found');
+    const match = src.name.match(/^(.*?)(?:\s*\(copy(?:\s+\d+)?\))?$/);
+    const baseName = match ? match[1] : src.name;
+    const existing = await db.iCP.findMany({
+      where: { tenantId: user.tenantId, name: { startsWith: baseName } },
+      select: { name: true }
+    });
+    const existingNames = new Set(existing.map(e => e.name));
+    let newName = `${baseName} (copy)`;
+    let counter = 2;
+    while (existingNames.has(newName)) {
+      newName = `${baseName} (copy ${counter})`;
+      counter++;
+    }
     return Response.json(await db.iCP.create({
       data: {
         tenantId: user.tenantId,
-        name: `${src.name} (copy)`.slice(0, 200),
+        name: newName.slice(0, 200),
         offer: src.offer,
         industries: src.industries,
         companySizes: src.companySizes,

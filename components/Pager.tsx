@@ -2,10 +2,12 @@
 
 export default function Pager({ page, pages, total, label, onPage }: { page: number; pages: number; total: number; label: string; onPage: (p: number) => void }) {
   if (total === 0) return null;
-  return <div className="toolbar" role="navigation" aria-label={`${label} pages`}>
-    <p className="muted">{total} {label} · page {page} of {pages}</p>
-    <button type="button" className="secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</button>
-    <button type="button" className="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next</button>
+  return <div className="toolbar" style={{ justifyContent: 'flex-start', marginTop: '16px' }} role="navigation" aria-label={`${label} pages`}>
+    <p className="muted" style={{ margin: 0, marginRight: '12px' }}>{total} {label}{pages > 1 ? ` · page ${page} of ${pages}` : ''}</p>
+    {pages > 1 && <div style={{ display: 'flex', gap: '8px' }}>
+      <button type="button" className="secondary" disabled={page <= 1} onClick={(e) => { e.currentTarget.blur(); onPage(page - 1); }}>Previous</button>
+      <button type="button" className="secondary" disabled={page >= pages} onClick={(e) => { e.currentTarget.blur(); onPage(page + 1); }}>Next</button>
+    </div>}
   </div>;
 }
 
