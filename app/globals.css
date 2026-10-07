@@ -157,3 +157,14 @@ details summary{cursor:pointer;min-height:32px}
 }
 
 .aiAssist{background:var(--surface);border:1px dashed var(--accent);border-radius:12px;padding:14px;margin:12px 0}.aiAssist textarea{width:100%}.aiReply{margin-top:8px}.aiReply pre{white-space:pre-wrap;overflow-wrap:anywhere}
+
+@keyframes spin { 100% { transform: rotate(360deg); } }
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
