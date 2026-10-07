@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { db } from '../db';
 import { GraphClient, MailInput, mailboxPath, mimeMessage } from './graph';
 
+// Logs identify a recipient without disclosing the address.
+const hashRecipient = (email: string) => createHash('sha256').update(email.toLowerCase()).digest('hex').slice(0, 12);
+
 // Every state transition is committed BEFORE a remote side effect. An uncertain send
 // can be read/reconciled but never automatically submitted a second time.
 // One workspace notice from the first connected mailbox. Returns false when Microsoft is not connected.
@@ -52,8 +55,12 @@ export async function sendMicrosoft(tenantId: string, key: string, input: MailIn
     const claimed = await db.mailReceipt.updateMany({where:{key,status:'NEW'},data:{status:'CREATING'}});
     if (!claimed.count) throw new Error('m365_send_in_progress');
     try {
+      // Diagnostics only: message key, subject/body lengths, content type and provider status.
+      // Never logs the body text, recipient address, credentials or tokens.
+      console.log(JSON.stringify({ event: 'm365_send_attempt', key, mailbox: input.from, subjectLength: input.subject.length, bodyLength: input.body.length, contentType: 'text/plain', recipient: hashRecipient(input.to) }));
       const message = await graph.request(`${base}/messages`, 'POST', mimeMessage(input,key), true);
       if (!message?.id) throw new Error('m365_draft_missing_id');
+      console.log(JSON.stringify({ event: 'm365_draft_created', key, draftId: message.id, providerStatus: 'ok' }));
       receipt = await db.mailReceipt.update({where:{key},data:{status:'DRAFT',draftId:message.id,internetMessageId:message.internetMessageId,conversationId:message.conversationId}});
     } catch {
       await db.mailReceipt.update({where:{key},data:{status:'AMBIGUOUS',error:'draft_creation_uncertain'}});
@@ -66,8 +73,10 @@ export async function sendMicrosoft(tenantId: string, key: string, input: MailIn
   try {
     await graph.request(`${base}/messages/${encodeURIComponent(receipt.draftId)}/send`, 'POST');
     await db.mailReceipt.update({where:{key},data:{status:'ACCEPTED',error:null}});
+    console.log(JSON.stringify({ event: 'm365_send_accepted', key, messageId: receipt.draftId, bodyLength: input.body.length, contentType: 'text/plain' }));
     return {messageId:receipt.draftId};
-  } catch {
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'm365_send_uncertain', key, draftId: receipt.draftId, error: error instanceof Error ? error.message : 'unknown' }));
     await db.mailReceipt.update({where:{key},data:{status:'AMBIGUOUS',error:'send_acceptance_uncertain'}});
     throw new Error('m365_send_ambiguous');
   }

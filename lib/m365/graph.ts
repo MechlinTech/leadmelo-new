@@ -55,8 +55,33 @@ export const mailInput = z.object({
   subject:z.string().min(1).max(200), body:z.string().min(1).max(10000),
   headers:z.object({'List-Unsubscribe':z.string(), 'List-Unsubscribe-Post':z.literal('List-Unsubscribe=One-Click')}).strict(),
   calendlyUrl:z.string().url()
-}).strict();
+}).strict().superRefine((v, ctx) => {
+  // A body that is only whitespace, or only markup with no visible text, sends successfully but
+  // arrives visually empty. Reject it here so it can never be marked SENT.
+  if (!hasVisibleText(v.body)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['body'], message: 'mail_body_effectively_empty' });
+  if (!v.subject.trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['subject'], message: 'mail_subject_blank' });
+});
 export type MailInput = z.infer<typeof mailInput>;
+
+// True when the string carries something a recipient can actually read: non-whitespace text, or
+// HTML/entities that decode to text. Tags, entities, comments and whitespace alone are empty.
+export function hasVisibleText(body: string | null | undefined): boolean {
+  if (typeof body !== 'string' || !body.trim()) return false;
+  const withoutMarkup = body
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<[^>]+>/g, ' ');
+  const decoded = withoutMarkup
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  // Zero-width and other invisible formatting characters read as blank to a recipient.
+  const INVISIBLE = /[\s\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u{E0001}-\u{E007F}\u{FE00}-\u{FE0F}\u{1F3FB}-\u{1F3FF}]/u;
+  return [...decoded].some(ch => ch.trim() !== '' && !INVISIBLE.test(ch));
+}
 export function mimeMessage(input: MailInput, key: string) {
   mailInput.parse(input);
   for (const text of [input.from, input.to, input.subject, input.fromName, key, ...Object.values(input.headers)]) if (/[\r\n]/.test(text)) throw new Error('mail_header_injection');
