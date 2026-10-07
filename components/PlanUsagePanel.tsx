@@ -9,7 +9,7 @@ export default function PlanUsagePanel() {
   const [info, setInfo] = useState<PlanInfo | null>(null), [error, setError] = useState('');
   useEffect(() => { api<PlanInfo>('plan').then(setInfo).catch(e => setError((e as Error).message)); }, []);
   if (error) return <p role="alert" className="error">Plan information unavailable: {error}</p>;
-  if (!info) return <p role="status" className="muted">Loading plan…</p>;
+  if (!info) return null;
   return <section aria-labelledby="plan-title">
     <h2 id="plan-title">Plan and usage</h2>
     <p><span className="pill">{info.name}</span> {info.trialDaysLeft !== null && <span className="muted"> {info.trialExpired ? 'Trial ended.' : `${info.trialDaysLeft} day${info.trialDaysLeft === 1 ? '' : 's'} left in the trial.`}</span>}</p>
