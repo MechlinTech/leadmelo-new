@@ -21,6 +21,16 @@ export async function sendWorkspaceNotice(tenantId: string, to: string, subject:
   return true;
 }
 
+// Platform notices (access-request confirmations, account-ready mail) are delivered from the
+// first connected Microsoft 365 mailbox on this installation, or PLATFORM_MAIL_TENANT_ID's.
+// `send` is injectable so tests can stub the remote side effect.
+export async function sendPlatformNotice(to: string, subject: string, text: string, send: typeof sendWorkspaceNotice = sendWorkspaceNotice) {
+  const tenantId = process.env.PLATFORM_MAIL_TENANT_ID
+    ?? (await db.m365Connection.findFirst({ where: { enabled: true }, select: { tenantId: true } }))?.tenantId;
+  if (!tenantId) return false;
+  return send(tenantId, to, subject, text);
+}
+
 export async function sendMicrosoft(tenantId: string, key: string, input: MailInput, client?: GraphClient) {
   const config = await db.m365Connection.findUnique({where:{tenantId}});
   if (!config?.enabled || input.tenantId !== tenantId || !config.mailboxes.includes(input.from)) throw new Error('m365_sender_not_allowed');

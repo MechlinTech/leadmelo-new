@@ -50,7 +50,7 @@ test('every compose variable is documented in .env.example, and versions agree e
   assert.match(text, new RegExp(`RELEASE_TAG:-${pkg.version.replace(/\./g, '\\.')}`), 'compose default tag equals package.json version');
   assert.ok(envExample.includes(`RELEASE_TAG=${pkg.version}`), '.env.example RELEASE_TAG equals package.json version');
   assert.ok(readFileSync('package-lock.json', 'utf8').includes(`"version": "${pkg.version}"`));
-  assert.ok(!envExample.split('\n').some(l => /^(POSTGRES_PASSWORD|SESSION_SECRET|DATA_ENCRYPTION_KEY|APP_DB_PASSWORD)=(?!CHANGE_ME$)/.test(l)), '.env.example holds placeholders only');
+  assert.ok(!envExample.split(/\r?\n/).some(l => /^(POSTGRES_PASSWORD|SESSION_SECRET|DATA_ENCRYPTION_KEY|APP_DB_PASSWORD)=(?!CHANGE_ME\s*$)/.test(l)), '.env.example holds placeholders only');
 });
 
 test('services run commands that exist, and the health checks target real routes', () => {

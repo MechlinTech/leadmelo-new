@@ -14,6 +14,10 @@ x-app: &app
     AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-200}
     ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
     ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
+    # TEMP QA ONLY: when set, follow-up sequence steps are scheduled N minutes out instead of N business days.
+    TEMP_QA_FOLLOWUP_MINUTES: ${TEMP_QA_FOLLOWUP_MINUTES:-}
+    GATEWAY_DUMMY_DISCOVERY: ${GATEWAY_DUMMY_DISCOVERY:-false}
+    GATEWAY_DUMMY_EMAILS: ${GATEWAY_DUMMY_EMAILS:-}
   networks: [backend]
   init: true
   security_opt: [no-new-privileges:true]
@@ -76,6 +80,7 @@ services:
   # config directory (tenant bindings and vendor keys, mode 600) and a small state volume.
   gateway:
     image: leadmelo:${RELEASE_TAG:-20.0.0}
+    build: .
     profiles: ["gateway"]
     restart: unless-stopped
     command: ["npm", "run", "gateway"]

@@ -13,7 +13,7 @@ export async function reserveProviderSpend(tenantId: string, campaignId: string,
     const s = await tx.tenantSetting.findUniqueOrThrow({ where: { tenantId } });
     if (s.suspended) return { quantity: 0, reason: 'tenant_suspended' as const };
     const existing = await tx.usageLedger.findUnique({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: key } } });
-    if (existing) return { quantity: Math.min(requested, existing.quantity), reason: 'ok' as const };
+    if (existing) return { quantity: existing.quantity, reason: 'ok' as const };
     let quantity = requested;
     if (s.monthlySpendCapCents !== null && s.providerCostCents > 0) {
       const spent = (await tx.usageLedger.aggregate({ where: { tenantId, createdAt: { gte: monthStart(now) } }, _sum: { costCents: true } }))._sum.costCents ?? 0;

@@ -18,7 +18,7 @@ try {
   await run(['node_modules/prisma/build/index.js', 'migrate', 'deploy']);
   // PGlite shares a session across socket clients. Prisma's statement names
   // restart in each test process, unlike separate native PostgreSQL sessions.
-  for (const file of ['tests/integration/engine.test.mjs', 'tests/integration/reliability.test.mjs', 'tests/integration/calendly.test.mjs', 'tests/integration/versions_usage.test.mjs', 'tests/integration/identity.test.mjs', 'tests/integration/ops.test.mjs', 'tests/integration/privacy.test.mjs', 'tests/integration/experiments.test.mjs', 'tests/integration/growth.test.mjs', 'tests/integration/ai.test.mjs']) {
+  for (const file of ['tests/integration/engine.test.mjs', 'tests/integration/reliability.test.mjs', 'tests/integration/calendly.test.mjs', 'tests/integration/versions_usage.test.mjs', 'tests/integration/identity.test.mjs', 'tests/integration/ops.test.mjs', 'tests/integration/privacy.test.mjs', 'tests/integration/experiments.test.mjs', 'tests/integration/growth.test.mjs', 'tests/integration/ai.test.mjs', 'tests/integration/accessRequests.test.mjs']) {
     await pg.exec('DEALLOCATE ALL');
     await run(['--import', 'tsx', '--test', file]);
   }

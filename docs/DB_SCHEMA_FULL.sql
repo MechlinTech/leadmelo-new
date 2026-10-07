@@ -1031,3 +1031,11 @@ ALTER TABLE "TenantSetting" ADD CONSTRAINT "TenantSetting_ai_lengths"
   CHECK (("aiBaseUrl" IS NULL OR length("aiBaseUrl") <= 300) AND ("aiModel" IS NULL OR length("aiModel") <= 120));
 ALTER TABLE "TenantSetting" ADD CONSTRAINT "TenantSetting_ai_features"
   CHECK ("aiFeatures" <@ ARRAY['campaign_assist','reply_assist']::TEXT[]);
+
+-- ===== prisma/migrations/20261006160000_access_request_onboarding/migration.sql =====
+-- Onboarding state for access requests: approval, linked account, last email send, last delivery error.
+ALTER TABLE "AccessRequest" ADD COLUMN "status" TEXT NOT NULL DEFAULT 'PENDING',
+  ADD COLUMN "userId" TEXT,
+  ADD COLUMN "lastEmailAt" TIMESTAMP(3),
+  ADD COLUMN "emailError" TEXT;
+ALTER TABLE "AccessRequest" ADD CONSTRAINT access_request_status CHECK ("status" IN ('PENDING','APPROVED'));

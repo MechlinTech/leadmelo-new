@@ -15,28 +15,12 @@ const MESSAGES: Record<string, string> = {
   reply_not_found: 'That reply was not found.',
   booked_appointment_not_found: 'That booked meeting was not found.',
   qualification_requirements_not_met: 'This meeting does not yet meet the campaign qualification rules.',
-  password_blank: 'Password cannot contain only blank spaces. Please enter a valid password.',
-  ai_not_enabled: 'AI assist is off. Turn it on in Settings and save before drafting.',
-  ai_feature_off: 'That AI feature is turned off. Enable it under Settings, then save.',
-  ai_not_configured: 'Save an AI base URL and model, then test again.',
-  ai_unreachable: 'The AI service could not be reached. Check the base URL and that this server can call it.',
-  ai_bad_shape: 'The model replied, but not in the expected format. Try the suggestion again.',
-  ai_incomplete_icp: 'The model did not return a complete customer profile. Try again.',
-  ai_empty_email: 'The model did not return an email subject and body. Try again.',
-  ai_timeout: 'The model took too long to answer. Try again.',
-  ai_no_json: 'The model did not return a usable draft. Try again.',
-  ai_bad_json: 'The model did not return a usable draft. Try again.',
-  no_records_found: 'No matching workspace records were found for this address. Nothing was erased.',
   experiment_running_on_step: 'An experiment is running on that email step. Pause it before editing the copy.',
   id_required: 'A record id is required.',
   import_too_large: 'Import at most 200 prospects at a time.',
   mfa_required: 'Enter the 6-digit code from your authenticator app, or a recovery code.',
   invalid_mfa_code: 'That code was not accepted. Codes can be used once; wait for the next code and try again.',
   ai_url_required: 'Enter an AI base URL before enabling AI assist.',
-  ai_model_is_email: 'The model name is an email address. For OpenAI, choose the OpenAI preset and use a model such as gpt-4o-mini.',
-  ai_key_required: 'Paste the API key from your AI provider, then save before testing.',
-  ai_openai_key_invalid: 'That key is too short to be an OpenAI key. Paste the full key from platform.openai.com (it starts with sk-).',
-  m365_not_connected: 'Microsoft 365 is not connected, so the invitation email was not sent.',
   waiting_for_send_gate: 'This message is waiting on a send check (approval, send hours, mailbox sync, or sender health).',
   outside_send_window: 'Approved, but outside this campaign’s send hours in its timezone. It will send when the window opens.',
   awaiting_approval: 'This message is waiting for Approve send on the Automation page.',
@@ -47,6 +31,18 @@ const MESSAGES: Record<string, string> = {
   tenant_automation_off: 'Tenant automation is off in Settings.',
   tenant_suspended: 'This tenant is suspended.',
   gateway_not_configured: 'The provider gateway credential is not configured.',
+  gateway_requires_https: 'The provider gateway URL must be HTTPS, or the internal http://gateway address.',
+  integration_or_database_error: 'This automation run failed while talking to the gateway or saving the result. It will retry, then stop after three attempts.',
+  gateway_http_422: 'The discovery gateway rejected the request parameters. Check the campaign ICP targeting and retry.',
+  gateway_http_401: 'Authentication to the provider gateway failed. Please verify the gateway API key in Settings.',
+  gateway_http_403: 'Access to the provider gateway was forbidden for this tenant.',
+  gateway_http_502: 'The discovery provider gateway is unreachable or returned a bad gateway response. Check gateway service status and retry.',
+  gateway_http_503: 'The discovery provider gateway is temporarily busy or unavailable. The run will retry automatically.',
+  gateway_http_500: 'The discovery provider gateway encountered an internal server error. Please retry or check gateway service logs.',
+  provider_exceeded_limit: 'The discovery provider returned more prospects than permitted by the cap.',
+  lease_expired_after_max_attempts: 'The run timed out across maximum retry attempts. Check system health and trigger a new run.',
+  send_lease_exhausted: 'Email sending timed out across maximum retry attempts.',
+  daily_cap: 'Daily email cap reached for this campaign or tenant. Sending will resume in the next send window.',
   postal_address_missing: 'The business postal address is missing in Settings.',
   reverification_required: 'The contact’s email verification is missing or older than 7 days.'
 };
@@ -65,18 +61,16 @@ const READY: Record<string, string> = {
 export function userError(code: unknown): string {
   const raw = String(code ?? '').trim();
   if (!raw) return 'Something went wrong. Please try again.';
-  if (raw.startsWith('qualification_requirements_not_met:')) {
-    const parts = raw.slice('qualification_requirements_not_met:'.length).split(',').map(s => s.trim()).filter(Boolean);
-    return `This meeting does not yet meet the campaign qualification rules: ${parts.join('; ')}.`;
-  }
   if (raw.includes(' ') && !raw.startsWith('campaign_not_ready:') && !raw.startsWith('ai_url_rejected:')) return raw;
-  if (raw.startsWith('ai_provider_error_')) return `The AI service rejected the request (${raw.slice('ai_provider_error_'.length)}). Check the base URL, model, and API key.`;
-  if (raw.startsWith('m365_http_')) return `Microsoft 365 refused to send the invitation (${raw.slice('m365_http_'.length)}). Confirm the mailbox is allowed to send.`;
   if (raw.startsWith('campaign_not_ready:')) {
     const parts = raw.slice('campaign_not_ready:'.length).split(',').map(s => s.trim()).filter(Boolean);
     const list = parts.map(p => READY[p] ?? p.replaceAll('_', ' ')).join('; ');
     return `This campaign is not ready to start: ${list}. Open Settings to fix these.`;
   }
   if (raw.startsWith('ai_url_rejected:')) return `That AI URL was rejected: ${raw.slice('ai_url_rejected:'.length).trim()}`;
+  if (raw.startsWith('gateway_http_')) {
+    const status = raw.slice('gateway_http_'.length);
+    return MESSAGES[raw] ?? `Provider gateway returned HTTP ${status}. Please check gateway logs and retry.`;
+  }
   return MESSAGES[raw] ?? raw.replaceAll('_', ' ');
 }

@@ -13,7 +13,7 @@ export default function RequestAccessForm({ initialPlan }: { initialPlan?: PlanI
       setState('sent');
     } catch (err) { setState('idle'); setError((err as Error).message === 'rate_limit_exceeded' ? 'Too many requests from your network. Please try again later.' : 'Please check the fields and try again.'); }
   }
-  if (state === 'sent') return <div className="notice" role="status"><strong>Thank you.</strong> Your request was received. Our team sets up workspaces by hand and will contact you at the email you gave. We cannot promise a response time.</div>;
+  if (state === 'sent') return <div className="notice" role="status"><p>Your access request has been submitted successfully. Please check your email for confirmation and next steps.</p><p className="muted">Access is pending approval by our team. Once approved, we will email you a confirmation that your account is ready, along with a secure link to set your password.</p></div>;
   return <form className="editor" onSubmit={submit} noValidate={false}>
     <label>Your name<input name="name" required maxLength={120} autoComplete="name" /></label>
     <label>Work email<input name="email" type="email" required maxLength={254} autoComplete="email" /></label>

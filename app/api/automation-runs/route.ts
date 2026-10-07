@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { db } from '../../../lib/db';
 import { authenticate } from '../../../lib/auth';
 import { endpoint, HttpError, jsonBody } from '../../../lib/http';
@@ -15,6 +16,18 @@ export const POST = endpoint(async req => {
   const key = req.headers.get('idempotency-key');
   if (!key || key.length > 100) throw new HttpError(400, 'idempotency_key_required');
   const idempotencyKey = user.tenantId + ':' + campaignId + ':' + key;
-  const run = await db.automationRun.upsert({ where: { idempotencyKey }, update: {}, create: { tenantId: user.tenantId, campaignId, idempotencyKey } });
+  const run = await db.automationRun.upsert({
+    where: { idempotencyKey },
+    update: {
+      status: 'QUEUED',
+      errors: Prisma.DbNull,
+      attempts: 0,
+      availableAt: new Date(),
+      leaseUntil: null,
+      leaseToken: null,
+      finishedAt: null
+    },
+    create: { tenantId: user.tenantId, campaignId, idempotencyKey }
+  });
   return Response.json(run, { status: 202 });
 });

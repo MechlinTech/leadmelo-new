@@ -36,18 +36,19 @@ export function discoverDummy(
   const exclude = new Set(icp.exclusionRules.map(v => v.trim().toLowerCase()).filter(Boolean));
   const prospects: Prospect[] = [];
 
-  for (const email of deps.emails) {
+  const seenInReq = new Set<string>();
+  for (const rawEmail of deps.emails) {
     if (prospects.length >= req.limit) break;
-    const seenKey = `seen:${req.tenantId}:${req.campaignId}:${email}`;
-    if (deps.store.hasSeen(seenKey)) continue;
-
+const email = String(rawEmail ?? '').trim().toLowerCase();
+    if (!email || seenInReq.has(email)) continue;
+    seenInReq.add(email);
     const domainRaw = email.split('@')[1] ?? '';
     const domain = normalizeDomain(domainRaw);
     if (!looksLikeDomain(domain)) continue;
     if (exclude.has(domain) || exclude.has(email)) continue;
-    // Dummy mode intentionally reuses the same configured emails on every discover
-
-    // call so local/dev can re-test enrollment without rotating inboxes.
+// Always return the same canned prospects for QA: the gateway-level "seen" marker would
+    // otherwise suppress them after the first run and the worker would never requeue.
+    const seenKey = `seen:${req.tenantId}:${req.campaignId}:${email.toLowerCase()}`;
 
     const local = email.split('@')[0] ?? 'contact';
     const fullName = displayName(local);

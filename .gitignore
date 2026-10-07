@@ -12,3 +12,7 @@ test-results/
 playwright-report/
 coverage/
 .vscode/
+# Scratch scripts under scripts/_ often embed live keys while debugging.
+scripts/_*
+# Per-environment gateway tenant bindings and vendor keys. Never shared.
+gateway-config/

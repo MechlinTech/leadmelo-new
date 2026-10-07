@@ -16,8 +16,9 @@ export const sentSchema = z.object({ messageId: z.string().min(1).max(200) }).st
 
 export async function gateway<T>(encryptedKey: string, path: 'discover' | 'send' | 'verify', key: string, body: unknown, schema: z.ZodType<T>): Promise<T> {
   const url = new URL(process.env.PROVIDER_GATEWAY_URL ?? '');
-  const testLoopback = process.env.NODE_ENV === 'test' && ['127.0.0.1', 'localhost'].includes(url.hostname);
-  if (url.protocol !== 'https:' && !testLoopback) throw new Error('gateway_requires_https');
+  // https in production; http allowed for local/test loopback and the compose gateway service.
+  const allowHttp = ['127.0.0.1', 'localhost', 'gateway'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !allowHttp) throw new Error('gateway_requires_https');
   url.pathname = url.pathname.replace(/\/$/, '') + '/' + path;
   url.search = '';
   const res = await fetch(url, {

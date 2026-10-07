@@ -817,6 +817,10 @@ model AccessRequest {
   message   String?
   plan      String?
   source    String
+  status    String    @default("PENDING")
+  userId    String?
+  lastEmailAt DateTime?
+  emailError String?
   handledAt DateTime?
   createdAt DateTime  @default(now())
 

@@ -15,6 +15,9 @@ Database: PostgreSQL 16. Source of truth for the application client: `prisma/sch
 | `202609180007_identity` | TOTP and recovery-code columns on `User`, `PasswordReset` |
 | `202609180008_retention` | `TenantSetting.messageRetentionDays` |
 | `202609180009_experiments` | `Experiment`, `ExperimentVariant`, `ExperimentAssignment`, `ExperimentRecommendation`, partial unique indexes |
+| `202609180010_growth_deliverability` | `AccessRequest`, `AssistantQuestion`, deliverability status, holidays, Calendly reconciliation, `User.theme` |
+| `202609180011_ai_assist` | Optional per-tenant AI assist columns |
+| `20261006160000_access_request_onboarding` | `AccessRequest.status`, `userId`, `lastEmailAt`, `emailError` |
 
 All of V20's migrations (5-9) are **additive**: new tables, new nullable or defaulted columns, new constraints on new tables. None drops or rewrites existing data, so a V19 database upgrades with `npm run db:deploy`. Even so: back up first, rehearse on a restored copy, and run `docker compose run --rm migrate` (which also re-applies runtime-role grants) rather than migrating by hand.
 
@@ -94,3 +97,7 @@ Adds `AccessRequest` and `AssistantQuestion`; SPF/DKIM/DMARC status and `healthS
 ## Migration 11: optional AI assist (202609180011)
 
 Adds `aiEnabled`, `aiBaseUrl`, `aiModel`, `aiKey` (AES-256-GCM ciphertext) and `aiFeatures` to `TenantSetting`, with CHECK constraints on lengths and on the allowed feature names. Additive; nothing else reads these columns. AI calls are counted in `AuditEvent` (action `ai_call`) for the daily limit.
+
+## Migration 12: access-request onboarding (20261006160000)
+
+Adds onboarding state to `AccessRequest`: `status` (`PENDING`/`APPROVED`), the linked `userId`, `lastEmailAt`, and the last email-delivery error. Additive and used by the approval → account creation → setup-email flow.

@@ -273,7 +273,13 @@ test('dummy discovery returns configured emails without calling Apollo and still
       assert.deepEqual(p.signals, ['Hiring QA']);
       assert.equal(qualifyProspect(icp, p).eligible, true);
     }
+    // QA intent: dummy mode always returns the same canned prospects on every discover so a
+    // campaign can be re-activated and re-enrolled without rotating inboxes. The gateway-level
+    // "seen" marker must therefore not suppress them.
     const again = await discover(NO_APOLLO, 'dummy-key-0002', request('t3', { limit: 10 }));
-    assert.deepEqual(again.prospects, [], 'already-returned dummy emails are not reused on the same campaign');
+    assert.deepEqual(again.prospects.map(p => p.email), ['alice.tester@buyer1.example', 'bob.tester@buyer2.example'], 'dummy emails are returned again on a new discover key');
+    const repeat = await discover(NO_APOLLO, 'dummy-key-0001', request('t3', { limit: 10 }));
+    assert.deepEqual(repeat.prospects, r.prospects.map(p => ({ ...p, verifiedAt: repeat.prospects[0]?.verifiedAt })), 'a repeated idempotency key replays the stored response');
+    assert.equal(v.count('api.apollo.io'), 0, 'Apollo is still never called in dummy mode');
   } finally { await g.stop(); }
 });
