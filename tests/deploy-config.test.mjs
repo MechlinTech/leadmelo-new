@@ -9,7 +9,7 @@ import { parse } from 'yaml';
 // cannot prove the images build or the stack starts. That still needs a real Docker host.
 const compose = parse(readFileSync('docker-compose.selfhosted.yml', 'utf8'), { merge: true });
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
-const envExample = readFileSync('.env.example', 'utf8');
+const envExample = readFileSync('.env.example', 'utf8').replace(/\r\n/g, '\n');
 const envKeys = new Set(envExample.split('\n').map(l => /^([A-Z_]+)=/.exec(l)?.[1]).filter(Boolean));
 const svc = compose.services;
 const posixOnly = process.platform === 'win32' && !process.env.FORCE_POSIX_TESTS ? { skip: 'requires POSIX bash' } : {};

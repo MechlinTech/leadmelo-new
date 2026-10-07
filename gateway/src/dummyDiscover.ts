@@ -38,11 +38,15 @@ export function discoverDummy(
 
   for (const email of deps.emails) {
     if (prospects.length >= req.limit) break;
+    const seenKey = `seen:${req.tenantId}:${req.campaignId}:${email}`;
+    if (deps.store.hasSeen(seenKey)) continue;
+
     const domainRaw = email.split('@')[1] ?? '';
     const domain = normalizeDomain(domainRaw);
     if (!looksLikeDomain(domain)) continue;
     if (exclude.has(domain) || exclude.has(email)) continue;
     // Dummy mode intentionally reuses the same configured emails on every discover
+
     // call so local/dev can re-test enrollment without rotating inboxes.
 
     const local = email.split('@')[0] ?? 'contact';
@@ -57,6 +61,7 @@ export function discoverDummy(
       evidenceSummary: clip(`Dummy discovery prospect for development. ICP-aligned title "${title}" and signal "${signal}". No Apollo credit spent.`, 1000)
     });
     if (!parsed.success) continue;
+    deps.store.markSeen(seenKey);
     prospects.push(parsed.data);
   }
   return { prospects };
