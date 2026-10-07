@@ -27,6 +27,16 @@ test('run failures keep a safe, actionable code and never leak internals', () =>
   assert.equal(safeError(new Error('gateway_http_9999')), 'integration_or_database_error', 'only real HTTP codes pass');
 });
 
+test('every reason a queued message is closed is explained to the user', () => {
+  // These are the reasons the worker can close a scheduled message instead of sending it.
+  for (const code of ['send_target_unavailable', 'sequence_step_missing', 'sequence_stopped', 'suppressed_before_send', 'send_attempts_exhausted']) {
+    const message = userError(code);
+    assert.notEqual(message, code, `${code} must not fall through to the raw code`);
+    assert.deepEqual(message.match(/_/g), null, `${code} must render as a sentence, got: ${message}`);
+    assert.ok(message.length > 30, `${code} needs an actionable message`);
+  }
+});
+
 test('every gateway failure code tells the user what to do next', () => {
   for (const code of ['gateway_not_configured', 'gateway_credential_missing', 'gateway_unreachable', 'gateway_timeout', 'gateway_invalid_response', 'gateway_http_409', 'max_attempts_exhausted', 'integration_or_database_error']) {
     const message = userError(code);

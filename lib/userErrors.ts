@@ -56,6 +56,11 @@ const MESSAGES: Record<string, string> = {
   lease_expired_after_max_attempts: 'The run timed out across maximum retry attempts. Check system health and trigger a new run.',
   max_attempts_exhausted: 'This run used all three attempts without completing. Fix the cause shown above, then use Run now to queue a fresh run.',
   send_lease_exhausted: 'Email sending timed out across maximum retry attempts.',
+  send_attempts_exhausted: 'This message used all five send attempts without being accepted by the email provider. Check the reason shown, fix it, then queue the message again.',
+  send_target_unavailable: 'This message was canceled because its campaign, contact or recipient is no longer available.',
+  sequence_step_missing: 'This message was canceled because the email step it belonged to no longer exists in the campaign. Restore the step or queue a new message.',
+  sequence_stopped: 'This message was canceled because the contact replied or the sequence was stopped.',
+  suppressed_before_send: 'This message was canceled because the recipient unsubscribed or bounced before it could be sent.',
   daily_cap: 'Daily email cap reached for this campaign or tenant. Sending will resume in the next send window.',
   postal_address_missing: 'The business postal address is missing in Settings.',
   reverification_required: 'The contact’s email verification is missing or older than 7 days.'

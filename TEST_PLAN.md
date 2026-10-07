@@ -63,3 +63,10 @@ Automation-run failures are reported with a specific code (`gateway_unreachable`
 `gateway_not_configured`, `gateway_http_4xx/5xx`, `gateway_invalid_response`,
 `provider_exceeded_limit`). Anything unexpected is reported as `integration_or_database_error`; the
 stack trace is only in the worker log (`docker logs leadmelo-dev-worker-1 | grep automation_run_failed`).
+
+A queued message also always carries a reason in the queue's error column, including the reasons it
+is closed instead of sent: `sequence_step_missing` (its email step was removed by a campaign
+version), `send_target_unavailable`, `sequence_stopped`, `suppressed_before_send`,
+`send_attempts_exhausted` (five send attempts, none accepted) and `send_lease_exhausted`. Every one of
+them is explained in plain language on the Automation page. The scheduler walks past a message it
+cannot send right now, so one blocked message never holds up the reminders queued behind it.

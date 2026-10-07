@@ -23,6 +23,16 @@ import { reconcileAllCalendly } from './calendlyReconcile';
 // return the ORIGINAL reservation and settle may only run after enrollment.
 const MAX_RUN_ATTEMPTS = 3;
 
+// A queued message is attempted at most this many times. Transient provider faults retry
+// with backoff; the fifth failure is terminal and records the reason.
+const MAX_SEND_ATTEMPTS = 5;
+
+// How many due queue rows one processOutreach() pass looks at. The queue is ordered by
+// scheduledAt and shared by every tenant, so a row that cannot be sent right now (waiting
+// on a gate, leased by another worker) must not end the pass: the rows behind it are still
+// due and still sendable.
+const DUE_QUEUE_SCAN = 50;
+
 export async function scheduleRuns(now = new Date()) {
   if (process.env.OUTBOUND_ENABLED !== 'true') return;
   const campaigns = await db.campaign.findMany({ where: { status: 'ACTIVE', automationMode: { not: 'PAUSED' }, nextRunAt: { lte: now }, tenant: { settings: { automationEnabled: true } } }, take: 100, orderBy: { nextRunAt: 'asc' } });
@@ -154,7 +164,15 @@ export async function recheckOutreachBeforeSend(eventId: string, leaseToken: str
     const finish = async (status: 'QUEUED' | 'CANCELED', error: string | null) => {
       await tx.outreachEvent.updateMany({
         where: { id: event.id, status: 'SENDING', leaseToken },
-        data: { status, error, leaseToken: null, leaseUntil: null, ...(status === 'QUEUED' ? { scheduledAt: new Date(now.getTime() + 900000) } : {}) }
+        data: {
+          status, error, leaseToken: null, leaseUntil: null,
+          // A gate wait is not a failed delivery attempt. The claim above already spent one,
+          // and the due-row query only claims attempts < MAX_SEND_ATTEMPTS, so without giving
+          // it back a message that kept hitting a wait (send window, approval, mailbox sync)
+          // would silently reach the attempt ceiling while still QUEUED: never sent, never
+          // FAILED, never alerted.
+          ...(status === 'QUEUED' ? { scheduledAt: new Date(now.getTime() + 900000), attempts: Math.max(0, event.attempts - 1) } : {})
+        }
       });
     };
 
@@ -192,10 +210,16 @@ export async function recheckOutreachBeforeSend(eventId: string, leaseToken: str
   }, { timeout: 10000, maxWait: 5000 });
 }
 
-export async function processOutreach(now = new Date()) {
-  if (process.env.OUTBOUND_ENABLED !== 'true') return false;
-  const candidate = await db.outreachEvent.findFirst({ where: { attempts: { lt: 5 }, scheduledAt: { lte: now }, OR: [{ status: 'QUEUED' }, { status: 'SENDING', leaseUntil: { lt: now } }] }, orderBy: { scheduledAt: 'asc' } });
-  if (!candidate?.campaignId || !candidate.contactId) return false;
+// One due row from the shared queue, resolved as far as this pass can:
+//   'sent'     the provider accepted it and the row is marked SENT.
+//   'retried'  a send was attempted and failed; the row carries its reason and a backoff.
+//   'canceled' it is no longer sendable (reply, suppression, detached target) and is closed.
+//   'dropped'  it can never succeed (no readable copy, no sequence step) and is closed.
+//   'wait'     nothing was attempted: a gate, a cap, or another worker's live lease.
+// It never returns without either attempting a send or moving the row on, so a row that is
+// merely waiting cannot block the rows behind it.
+type OutreachOutcome = 'sent' | 'retried' | 'canceled' | 'dropped' | 'wait';
+async function processOutreachRow(candidate: OutreachCandidate, now: Date): Promise<OutreachOutcome> {
   const leaseToken = randomUUID();
   try {
     const prepared = await db.$transaction(async tx => {
@@ -205,14 +229,19 @@ export async function processOutreach(now = new Date()) {
       await tx.$queryRaw`SELECT id FROM "Tenant" WHERE id=${candidate.tenantId} FOR UPDATE`;
       c = await tx.campaign.findUniqueOrThrow({ where: { id: candidate.campaignId! } });
       const e = await tx.outreachEvent.findUniqueOrThrow({ where: { id: candidate.id } });
-      if (!['QUEUED', 'SENDING'].includes(e.status) || (e.leaseUntil && e.leaseUntil > now) || e.attempts >= 5) return false;
+      // Another worker holds a live lease on this row, or it is no longer claimable. Nothing was
+      // changed, so it must not count as progress and must not be retried in this pass.
+      if (!['QUEUED', 'SENDING'].includes(e.status) || (e.leaseUntil && e.leaseUntil > now) || e.attempts >= MAX_SEND_ATTEMPTS) return 'wait' as const;
       const s = await tx.tenantSetting.findUnique({ where: { tenantId: e.tenantId } });
       const contact = await tx.contact.findFirst({ where: { id: e.contactId!, tenantId: e.tenantId } });
       const enrollment = await tx.enrollment.findUnique({ where: { campaignId_contactId: { campaignId: c.id, contactId: e.contactId! } } });
-      const stoppedSequence = enrollment?.stoppedAt && e.purpose === 'SEQUENCE';
-      if (!contact?.email || !enrollment || stoppedSequence || await tx.suppression.findUnique({ where: { tenantId_email: { tenantId: e.tenantId, email: contact.email } } })) {
-        await tx.outreachEvent.update({ where: { id: e.id }, data: { status: 'CANCELED' } });
-        return true;
+      const stoppedSequence = !!enrollment?.stoppedAt && e.purpose === 'SEQUENCE';
+      const suppressed = contact?.email ? await tx.suppression.findUnique({ where: { tenantId_email: { tenantId: e.tenantId, email: contact.email } } }) : null;
+      if (!contact?.email || !enrollment || stoppedSequence || suppressed) {
+        // Record why, so the queue never shows an unexplained CANCELED row.
+        const reason = !contact?.email ? 'send_target_unavailable' : stoppedSequence ? 'sequence_stopped' : suppressed ? 'suppressed_before_send' : 'send_target_unavailable';
+        await tx.outreachEvent.update({ where: { id: e.id }, data: { status: 'CANCELED', leaseToken: null, leaseUntil: null, error: reason } });
+        return 'canceled' as const;
       }
       const health = await tx.deliverabilityProfile.findUnique({ where: { tenantId_senderEmail: { tenantId: e.tenantId, senderEmail: c.senderEmail } } });
       const microsoft = await tx.m365Connection.findUnique({where:{tenantId:e.tenantId}});
@@ -222,8 +251,9 @@ export async function processOutreach(now = new Date()) {
       const wait = outreachWaitReason({ campaign: c, settings: s, health, approvedAt: e.approvedAt, mailboxBlocked, stale, now });
       if (wait) {
         if (stale && !contact.reverifyRequestedAt) await tx.contact.update({where:{id:contact.id},data:{reverifyRequestedAt:now,verificationAttempts:0,verificationNextAt:now}});
+        // The attempt was not spent yet at this point, so only the time moves.
         await tx.outreachEvent.update({ where: { id: e.id }, data: { scheduledAt: new Date(now.getTime() + 900000), error: wait } });
-        return false;
+        return 'wait' as const;
       }
       const day = new Date(now.getTime() - 86400000);
       const used = { reservedAt: { gte: day }, id: { not: e.id } };
@@ -232,13 +262,20 @@ export async function processOutreach(now = new Date()) {
       const campaignCount = await tx.outreachEvent.count({ where: { ...used, campaignId: c.id } });
       if (tenantCount >= s!.dailySendCap || senderCount >= health!.dailyCap || campaignCount >= c.dailySendCap) {
         await tx.outreachEvent.update({ where: { id: e.id }, data: { scheduledAt: new Date(now.getTime() + 3600000), error: 'daily_cap' } });
-        return false;
+        return 'wait' as const;
       }
       if (e.purpose === 'SEQUENCE') {
         const gate = await sendAllowance(tx, e.tenantId, now);
-        if (!gate.allowed) { await tx.outreachEvent.update({ where: { id: e.id }, data: { scheduledAt: new Date(now.getTime() + 3600000), error: gate.reason } }); return false; }
+        if (!gate.allowed) { await tx.outreachEvent.update({ where: { id: e.id }, data: { scheduledAt: new Date(now.getTime() + 3600000), error: gate.reason } }); return 'wait' as const; }
       }
-      const step = e.purpose === 'SEQUENCE' ? await tx.sequenceStep.findUniqueOrThrow({ where: { campaignId_stepOrder: { campaignId: c.id, stepOrder: e.stepOrder! } } }) : null;
+      // A queued step whose sequence step no longer exists can never be rendered or sent.
+      // findUniqueOrThrow used to abort the pass here, leaving the row due at the head of the
+      // queue with no recorded reason, so it blocked every message behind it on every tick.
+      const step = e.purpose === 'SEQUENCE' ? await tx.sequenceStep.findUnique({ where: { campaignId_stepOrder: { campaignId: c.id, stepOrder: e.stepOrder! } } }) : null;
+      if (e.purpose === 'SEQUENCE' && !step) {
+        await tx.outreachEvent.update({ where: { id: e.id }, data: { status: 'FAILED', leaseToken: null, leaseUntil: null, error: 'sequence_step_missing' } });
+        return 'dropped' as const;
+      }
       const lead = contact.leadId ? await tx.lead.findUnique({ where: { id: contact.leadId } }) : null;
       const token = unsubscribeToken(e.tenantId, contact.email);
       const unsubscribeUrl = `${process.env.APP_URL}/unsubscribe?token=${encodeURIComponent(token)}`;
@@ -262,12 +299,14 @@ export async function processOutreach(now = new Date()) {
       const input: MailInput = { tenantId: e.tenantId, campaignId: c.id, contactId: contact.id, from: c.senderEmail, fromName: c.senderName, to: contact.email, subject, body, headers: { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }, calendlyUrl };
       return {e,c,contact,enrollment,step,input,key:s!.gatewayKey!,microsoft:!!microsoft};
     }, { timeout: 10000, maxWait: 5000 });
-    if (typeof prepared === 'boolean') return prepared;
+    if (typeof prepared === 'string') return prepared;
     const {e,c,contact,enrollment,step,input} = prepared;
     try {
       // A reply, suppression, booking, pause or approval change may arrive while the send is
       // prepared. Serialize this final check with tenant-scoped suppression before network I/O.
-      if (!await recheckOutreachBeforeSend(e.id, leaseToken, input.to, now)) return true;
+      // The row is now CANCELED or re-queued with its reason. Either way it is off the head of
+      // the queue and must not stop the pass; both outcomes count as handled work.
+      if (!await recheckOutreachBeforeSend(e.id, leaseToken, input.to, now)) return 'canceled';
       if (!input.subject.trim()) throw new Error('mail_subject_blank');
       if (!hasVisibleText(input.body)) throw new Error('mail_body_effectively_empty');
       mailInput.parse(input);
@@ -296,19 +335,63 @@ export async function processOutreach(now = new Date()) {
     } catch (error) {
       const code = safeError(error);
       const invalidContent = /^mail_(subject|body)_/.test(code);
-      await db.outreachEvent.updateMany({ where: { id: e.id, status:'SENDING', leaseToken }, data: { status: invalidContent || e.attempts + 1 >= 5 ? 'FAILED' : 'QUEUED', scheduledAt: new Date(now.getTime() + 60000 * 2 ** e.attempts), leaseUntil: null, error: code } });
+      // Bounded retries with exponential backoff. The attempt was spent when the row was
+      // leased to SENDING, so e.attempts is the count before this send; the fifth is terminal.
+      const terminal = invalidContent || e.attempts + 1 >= MAX_SEND_ATTEMPTS;
+      await db.outreachEvent.updateMany({ where: { id: e.id, status:'SENDING', leaseToken }, data: { status: terminal ? 'FAILED' : 'QUEUED', scheduledAt: new Date(now.getTime() + 60000 * 2 ** e.attempts), leaseToken: null, leaseUntil: null, error: code } });
+      return terminal ? 'dropped' : 'retried';
     }
-    return true;
+    return 'sent';
   } catch (error) {
     const code = safeError(error);
     // A message with no readable copy cannot succeed on retry, so stop it now with a visible
     // reason instead of re-queuing it forever. Never mark it SENT.
-    if (/^mail_(subject|body)_/.test(code) && candidate) {
-      await db.outreachEvent.updateMany({ where: { id: candidate.id, status: { in: ['QUEUED', 'SENDING'] } }, data: { status: 'FAILED', error: code, leaseUntil: null } });
+    if (/^mail_(subject|body)_/.test(code)) {
+      await db.outreachEvent.updateMany({ where: { id: candidate.id, status: { in: ['QUEUED', 'SENDING'] } }, data: { status: 'FAILED', error: code, leaseToken: null, leaseUntil: null } });
+      console.error(JSON.stringify({ event: 'outreach_transaction_failed', id: candidate.id, code }));
+      return 'dropped';
     }
-    console.error(JSON.stringify({ event: 'outreach_transaction_failed', code }));
-    return false;
+    // Any other fault (a lock wait, a transient database error) leaves the row exactly as it
+    // was: still due, attempt not spent. It is retried on the next pass, and because the pass
+    // now walks past rows it cannot handle, it cannot block any other scheduled message.
+    console.error(JSON.stringify({ event: 'outreach_transaction_failed', id: candidate.id, code }));
+    return 'wait';
   }
+}
+
+type OutreachCandidate = { id: string; tenantId: string; campaignId: string | null; contactId: string | null };
+
+// One pass over the due queue. Every candidate is moved on: sent, canceled, failed or
+// re-queued with a reason. Returns whether the pass did work, which is what tick()'s bounded
+// drain loop uses to decide whether to run another pass.
+export async function processOutreach(now = new Date()) {
+  if (process.env.OUTBOUND_ENABLED !== 'true') return false;
+  const candidates = (await db.outreachEvent.findMany({
+    where: { attempts: { lt: MAX_SEND_ATTEMPTS }, scheduledAt: { lte: now }, OR: [{ status: 'QUEUED' }, { status: 'SENDING', leaseUntil: { lt: now } }] },
+    orderBy: { scheduledAt: 'asc' }, take: DUE_QUEUE_SCAN,
+    select: { id: true, tenantId: true, campaignId: true, contactId: true }
+  })) as OutreachCandidate[];
+  if (!candidates.length) return false;
+  // A queued row with no campaign or contact (its parent was detached) can never be sent.
+  // It used to be selected, silently skipped, and returned 'nothing to do', which left it as
+  // the oldest due row on every later pass and stopped the queue behind it.
+  const sendable: OutreachCandidate[] = [];
+  for (const candidate of candidates) {
+    if (candidate.campaignId && candidate.contactId) { sendable.push(candidate); continue; }
+    await db.outreachEvent.updateMany({
+      where: { id: candidate.id, status: { in: ['QUEUED', 'SENDING'] } },
+      data: { status: 'CANCELED', leaseToken: null, leaseUntil: null, error: 'send_target_unavailable' }
+    });
+  }
+  // A pass reports progress when it sent, retried or canceled a message. A row that was only
+  // re-queued for later, or dropped as undeliverable, is not progress: an otherwise idle pass
+  // ends tick()'s drain loop instead of spinning it.
+  let progressed = false;
+  for (const candidate of sendable) {
+    const outcome = await processOutreachRow(candidate, now);
+    if (outcome !== 'wait' && outcome !== 'dropped') progressed = true;
+  }
+  return progressed;
 }
 
 export async function tick() {
@@ -321,7 +404,11 @@ export async function tick() {
   // A queued run whose campaign was deleted or deactivated while it waited can never be
   // processed; release it so the campaign is not blocked by a permanently pending run.
   await db.automationRun.updateMany({ where: { status: 'QUEUED', campaign: { status: { not: 'ACTIVE' } } }, data: { status: 'CANCELED', finishedAt: now, errors: Prisma.DbNull } });
-  await db.outreachEvent.updateMany({where:{status:'SENDING',attempts:{gte:5},leaseUntil:{lt:new Date()}},data:{status:'FAILED',error:'send_lease_exhausted'}});
+  await db.outreachEvent.updateMany({where:{status:'SENDING',attempts:{gte:MAX_SEND_ATTEMPTS},leaseUntil:{lt:new Date()}},data:{status:'FAILED',leaseToken:null,leaseUntil:null,error:'send_lease_exhausted'}});
+  // A QUEUED row that has used up its attempts can never be claimed again (the due query
+  // requires attempts < MAX_SEND_ATTEMPTS), so without this it stayed QUEUED forever with no
+  // failure and no alert: an operator saw a scheduled reminder that could never be sent.
+  await db.outreachEvent.updateMany({ where: { status: 'QUEUED', attempts: { gte: MAX_SEND_ATTEMPTS } }, data: { status: 'FAILED', leaseToken: null, leaseUntil: null, error: 'send_attempts_exhausted' } });
   await pollMicrosoft();
   await processReverification();
   await scheduleRuns();
