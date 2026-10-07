@@ -5,7 +5,7 @@ import { gateway, discoveredSchema, sentSchema } from './providers';
 import { qualifyProspect, withinSendWindow, addBusinessDays, renderTemplate, outreachWaitReason, followUpDueAt, qaFollowUpDelayMinutes } from './policy';
 import { unsubscribeToken } from './unsubscribe';
 import { sendMicrosoft } from './m365/send';
-import { MailInput } from './m365/graph';
+import { MailInput, hasVisibleText } from './m365/graph';
 import { pollMicrosoft } from './m365/sync';
 import { processReverification } from './reverification';
 import { collectAlerts, deliverAlert, raiseAlert } from './alerts';
@@ -133,7 +133,7 @@ export async function processRun(now = new Date()) {
 // generic integration/database failure.
 export function safeError(error: unknown) {
   const message = error instanceof Error ? error.message : 'unknown';
-  const SAFE = /^(gateway_http_\d{3}|gateway_requires_https|gateway_not_configured|gateway_unreachable|gateway_timeout|gateway_invalid_response|m365_[a-z_0-9]+|provider_exceeded_limit|unknown_template_variable)$/;
+  const SAFE = /^(gateway_http_\d{3}|gateway_requires_https|gateway_not_configured|gateway_unreachable|gateway_timeout|gateway_invalid_response|m365_[a-z_0-9]+|mail_[a-z_]+|provider_exceeded_limit|unknown_template_variable)$/;
   return SAFE.test(message) ? message : 'integration_or_database_error';
 }
 
@@ -245,9 +245,21 @@ export async function processOutreach(now = new Date()) {
       const vars = { firstName: contact.fullName.trim().split(/\s+/)[0] || 'there', company: lead?.company ?? '', senderName: c.senderName, calendlyUrl, offer: c.offer ?? '' };
       // A running experiment may substitute this step's copy; the choice is persisted with the send.
       const variant = step ? await pickVariant(tx, e.tenantId, c.id, enrollment.id, step.stepOrder) : null;
-      const subject = e.subject ?? renderTemplate(variant?.subject ?? step?.subject ?? '', vars);
-      const content = e.body ?? renderTemplate(variant?.body ?? step?.body ?? '', vars);
+      // Copy already stored on the event (a booking invitation, or a previously rendered message) is
+      // authoritative. Otherwise it comes from the step or experiment variant.
+      // Falling back to '' produced an email whose only content was the postal address and the
+      // unsubscribe footer, which arrives blank. Refuse to send instead, so it stays QUEUED with a
+      // visible reason rather than being marked SENT.
+      const subjectTemplate = variant?.subject ?? step?.subject ?? '';
+      const bodyTemplate = variant?.body ?? step?.body ?? '';
+      if (e.subject === null && !hasVisibleText(subjectTemplate)) throw new Error('mail_subject_template_empty');
+      if (e.body === null && !hasVisibleText(bodyTemplate)) throw new Error('mail_body_template_empty');
+      const subject = e.subject ?? renderTemplate(subjectTemplate, vars);
+      const content = e.body ?? renderTemplate(bodyTemplate, vars);
       const body = content.includes('\nUnsubscribe: ') ? content : `${content}\n\n${s!.postalAddress}\nUnsubscribe: ${unsubscribeUrl}`;
+      if (!hasVisibleText(body) || !subject.trim()) throw new Error('mail_body_effectively_empty');
+      // Diagnostics only: id, lengths, content type. Never the body text or any credential.
+      console.log(JSON.stringify({ event: 'outreach_prepared', id: e.id, messageKey: e.idempotencyKey, purpose: e.purpose, stepOrder: e.stepOrder, subjectLength: subject.length, bodyLength: body.length, contentType: 'text/plain', variant: !!variant, storedBody: e.body !== null }));
       await tx.outreachEvent.update({ where: { id: e.id }, data: { status: 'SENDING', attempts: { increment: 1 }, leaseToken, leaseUntil: new Date(now.getTime() + 120000), reservedAt: now, subject, body } });
       const input: MailInput = { tenantId: e.tenantId, campaignId: c.id, contactId: contact.id, from: c.senderEmail, fromName: c.senderName, to: contact.email, subject, body, headers: { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }, calendlyUrl };
       return {e,c,contact,enrollment,step,input,key:s!.gatewayKey!,microsoft:!!microsoft};
@@ -284,7 +296,13 @@ export async function processOutreach(now = new Date()) {
     }
     return true;
   } catch (error) {
-    console.error(JSON.stringify({ event: 'outreach_transaction_failed', code: safeError(error) }));
+    const code = safeError(error);
+    // A message with no readable copy cannot succeed on retry, so stop it now with a visible
+    // reason instead of re-queuing it forever. Never mark it SENT.
+    if (/^mail_(subject|body)_/.test(code) && candidate) {
+      await db.outreachEvent.updateMany({ where: { id: candidate.id, status: { in: ['QUEUED', 'SENDING'] } }, data: { status: 'FAILED', error: code, leaseUntil: null } });
+    }
+    console.error(JSON.stringify({ event: 'outreach_transaction_failed', code }));
     return false;
   }
 }
