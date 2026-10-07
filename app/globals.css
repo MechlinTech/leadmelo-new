@@ -48,7 +48,7 @@ code{overflow-wrap:anywhere;background:var(--surface-2);padding:2px 5px;border-r
 .editor{display:grid;gap:18px;margin:24px 0}
 .formGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
 .toolbar{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-.tableWrap{overflow-x:auto;position:relative;max-width:100%;-webkit-overflow-scrolling:touch}.tableWrap table{min-width:640px}
+.tableWrap{overflow-x:auto;position:relative;max-width:100%;-webkit-overflow-scrolling:touch;overflow-anchor:none}.tableWrap table{min-width:640px}
 table{width:100%;border-collapse:collapse;background:var(--surface)}
 td,th{padding:12px;text-align:left;border-bottom:1px solid var(--line);overflow-wrap:break-word;min-width:120px}
 th{font-size:13px;background:var(--surface-2)}
@@ -58,7 +58,7 @@ caption{text-align:left;padding:8px 0}
 .emptyRow p{margin:6px 0 0}
 fieldset{border:1px solid var(--line);border-radius:8px;padding:18px;display:grid;gap:15px;min-width:0}
 legend{font-weight:650}
-.recordList{list-style:none;padding:0}.recordList li{padding:14px 0;border-bottom:1px solid var(--line)}.recordList p{margin:6px 0}
+.recordList{list-style:none;padding:0;overflow-anchor:none}.recordList li{padding:14px 0;border-bottom:1px solid var(--line)}.recordList p{margin:6px 0}
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin:14px 0}
 .card{display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
 .card strong{font-size:26px;line-height:1.1}
@@ -170,4 +170,24 @@ details summary{cursor:pointer;min-height:32px}
   border-right-color: transparent;
   border-radius: 50%;
   animation: spin 0.75s linear infinite;
+}
+
+.toast {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+  animation: toastSlideDown 4s ease-in-out forwards;
+  max-width: 90vw;
+  width: max-content;
+  border-radius: 8px;
+}
+
+@keyframes toastSlideDown {
+  0% { transform: translate(-50%, -100%); opacity: 0; }
+  10% { transform: translate(-50%, 0); opacity: 1; }
+  85% { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+  100% { transform: translate(-50%, -150%); opacity: 0; pointer-events: none; }
 }
