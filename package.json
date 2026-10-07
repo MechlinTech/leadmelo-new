@@ -11,9 +11,9 @@
     "deepmerge-ts": "8.0.2"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node api.js && next dev",
+    "build": "node api.js && next build",
+    "start": "node api.js && next start",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.mjs",
     "test:integration": "node --import tsx --test --test-concurrency=1 tests/integration/*.test.mjs",
