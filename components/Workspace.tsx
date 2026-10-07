@@ -42,6 +42,7 @@ export default function Workspace({ section }: { section: Section }) {
   const [outreach, setOutreach] = useState<Row[]>([]), [replies, setReplies] = useState<Row[]>([]);
   const [campaigns, setCampaigns] = useState<Row[]>([]);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [icpMode, setIcpMode] = useState<'new' | 'existing'>('new');
   const [icpFormKey, setIcpFormKey] = useState(0);
   const [campaignFormKey, setCampaignFormKey] = useState(0);
@@ -73,6 +74,7 @@ export default function Workspace({ section }: { section: Section }) {
     }, 60);
   };
   const load = useCallback(async () => {
+    setLoading(true);
     setError('');
     try {
       if (section === 'settings') setSettings(await api('settings'));
@@ -211,9 +213,9 @@ export default function Workspace({ section }: { section: Section }) {
   const icpPageData = pageSlice(rows, icpPage, 10);
   const title = { overview: 'Meetings', icps: 'Ideal customer profiles', campaigns: 'Campaigns', settings: 'Workspace settings', leads: 'Prospects', 'automation-runs': 'Automation & exceptions' }[section];
   return <>
-    <div className="toolbar"><h1>{title}</h1><button onClick={() => void load()} disabled={loading || busy}>Refresh</button></div>
+    <div className="toolbar"><h1>{title}</h1><button onClick={() => { setIsRefreshing(true); window.location.reload(); }} disabled={loading || isRefreshing || busy}>{isRefreshing ? <span className="spinner" aria-hidden="true" /> : null} Refresh</button></div>
     {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
-    {loading ? <p role="status">Loading...</p> : <>
+    <>
       {section === 'overview' && <DigestPanel/>}
       {section === 'settings' && <><PlanUsagePanel/><AppearanceSettings/><AiSettings/><MicrosoftSettings/><SecuritySettings/><TeamMembers/><PrivacyTools/></>}
       {section === 'automation-runs' && <OperationalAlerts/>}
@@ -305,6 +307,6 @@ export default function Workspace({ section }: { section: Section }) {
         <h2>Outreach queue</h2>{outreach.length > 25 && <p className="muted">Showing the latest 25 of {outreach.length}.</p>}<ul className="recordList">{outreach.slice(0, 25).map(r => { const subject = r.reviewSubject ?? r.subject ?? ''; const body = r.reviewBody ?? r.body ?? ''; const status = r.statusLabel ?? (r.status === 'QUEUED' && r.approvedAt ? 'APPROVED' : r.status); return <li key={r.id}><strong>{r.contact?.email}</strong> &middot; Step {r.stepOrder ?? 1} &middot; {status}{r.scheduledAt ? <> &middot; Scheduled: {new Date(r.scheduledAt).toLocaleString()}</> : null}{r.sentAt ? <> &middot; Sent: {new Date(r.sentAt).toLocaleString()}</> : null}{r.error ? <> &middot; {userError(r.error)}</> : null}{r.reviewError && <p role="alert" className="error">{userError(r.reviewError)}</p>}<details><summary>Review message</summary><p>{subject}</p><pre>{body}</pre></details>{canWrite && r.status === 'QUEUED' && !r.approvedAt && <button disabled={busy || !r.reviewToken} onClick={() => void mutate('outreach', 'PATCH', { id: r.id, reviewToken: r.reviewToken })}>Approve send</button>}</li>; })}</ul>
         <h2>Replies</h2><p className="muted">Replies are classified automatically. Use the buttons when a person needs to qualify, suppress or dismiss one.</p>{replies.length > 25 && <p className="muted">Showing the latest 25 of {replies.length}.</p>}<ul className="recordList">{replies.slice(0, 25).map(r => <li key={r.id}><strong>{r.intent}</strong><p>{r.rawSnippet}</p><p>{r.recommendedAction}</p><ReplyAi replyId={r.id}/>{canWrite && <div className="toolbar"><button type="button" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'qualify' })}>Mark positive</button><button type="button" className="secondary" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'suppress' })}>Suppress sender</button><button type="button" className="secondary" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'dismiss' })}>Dismiss</button></div>}</li>)}</ul></>}
       {section !== 'settings' && rows.length === 0 && <p className="muted">No records yet.</p>}
-    </>}
+    </>
   </>;
 }
