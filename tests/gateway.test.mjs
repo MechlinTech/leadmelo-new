@@ -278,8 +278,9 @@ test('dummy discovery returns configured emails without calling Apollo and still
     // "seen" marker must therefore not suppress them.
     const again = await discover(NO_APOLLO, 'dummy-key-0002', request('t3', { limit: 10 }));
     assert.deepEqual(again.prospects.map(p => p.email), ['alice.tester@buyer1.example', 'bob.tester@buyer2.example'], 'dummy emails are returned again on a new discover key');
+    // Replaying the same idempotency key must return the identical stored response.
     const repeat = await discover(NO_APOLLO, 'dummy-key-0001', request('t3', { limit: 10 }));
-    assert.deepEqual(repeat.prospects, r.prospects.map(p => ({ ...p, verifiedAt: repeat.prospects[0]?.verifiedAt })), 'a repeated idempotency key replays the stored response');
+    assert.deepEqual(repeat.prospects, r.prospects, 'a repeated idempotency key replays the stored response');
     assert.equal(v.count('api.apollo.io'), 0, 'Apollo is still never called in dummy mode');
   } finally { await g.stop(); }
 });
