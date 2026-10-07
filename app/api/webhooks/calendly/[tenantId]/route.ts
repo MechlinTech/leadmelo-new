@@ -5,6 +5,10 @@ import { rateLimit } from '../../../../../lib/auth';
 import { handleProviderEvent } from '../../../../../lib/webhooks';
 import { normalizeCalendlyEvent, verifyCalendlySignature } from '../../../../../lib/calendly';
 
+function logCalendly(fields: Record<string, string | number | boolean | null>) {
+  console.log(JSON.stringify({ event: 'calendly_webhook', ...fields }));
+}
+
 export async function POST(req: Request, context: { params: Promise<{ tenantId: string }> }) {
   return endpoint(async request => {
     const { tenantId } = await context.params;
@@ -23,7 +27,10 @@ export async function POST(req: Request, context: { params: Promise<{ tenantId: 
       chunks.push(value);
     }
     const raw = Buffer.concat(chunks).toString('utf8');
-    if (!verifyCalendlySignature(raw, request.headers.get('calendly-webhook-signature') ?? '', decrypt(settings.calendlySigningKey))) throw new HttpError(401, 'invalid_webhook');
+    if (!verifyCalendlySignature(raw, request.headers.get('calendly-webhook-signature') ?? '', decrypt(settings.calendlySigningKey))) {
+      logCalendly({ tenantId, outcome: 'rejected', reason: 'invalid_signature' });
+      throw new HttpError(401, 'invalid_webhook');
+    }
     let data: unknown;
     try { data = JSON.parse(raw); } catch { throw new HttpError(400, 'invalid_json'); }
     // Resolve the attributed contact's stored address (tenant-scoped) before normalizing.
@@ -31,10 +38,15 @@ export async function POST(req: Request, context: { params: Promise<{ tenantId: 
     const contact = tokenContactId ? await db.contact.findFirst({ where: { id: tokenContactId, tenantId }, select: { email: true } }) : null;
     const result = normalizeCalendlyEvent(tenantId, data, () => contact?.email ?? null);
     // Unattributed bookings are acknowledged (so Calendly does not retry) but never create an appointment.
-    if (result.ignored) return Response.json({ ignored: true, reason: result.reason });
+    if (result.ignored) {
+      logCalendly({ tenantId, outcome: 'ignored', reason: result.reason, calendlyEvent: typeof (data as { event?: unknown }).event === 'string' ? (data as { event: string }).event : null });
+      return Response.json({ ignored: true, reason: result.reason });
+    }
     if (result.inviteeEmail !== result.event.email) {
       await db.operationalAlert.upsert({ where: { key: `${tenantId}:booking_invitee_mismatch:${result.event.bookingId}` }, update: {}, create: { tenantId, key: `${tenantId}:booking_invitee_mismatch:${result.event.bookingId}`, code: 'booking_invitee_mismatch', entityId: result.event.bookingId } });
     }
-    return Response.json(await handleProviderEvent(tenantId, result.event));
+    const saved = await handleProviderEvent(tenantId, result.event);
+    logCalendly({ tenantId, outcome: saved.duplicate ? 'duplicate' : 'applied', bookingType: result.event.type, inviteeMismatch: result.inviteeEmail !== result.event.email });
+    return Response.json(saved);
   })(req);
 }

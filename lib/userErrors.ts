@@ -20,7 +20,37 @@ const MESSAGES: Record<string, string> = {
   import_too_large: 'Import at most 200 prospects at a time.',
   mfa_required: 'Enter the 6-digit code from your authenticator app, or a recovery code.',
   invalid_mfa_code: 'That code was not accepted. Codes can be used once; wait for the next code and try again.',
-  ai_url_required: 'Enter an AI base URL before enabling AI assist.'
+  ai_url_required: 'Enter an AI base URL before enabling AI assist.',
+  waiting_for_send_gate: 'This message is waiting on a send check (approval, send hours, mailbox sync, or sender health).',
+  outside_send_window: 'Approved, but outside this campaign’s send hours in its timezone. It will send when the window opens.',
+  awaiting_approval: 'This message is waiting for Approve send on the Automation page.',
+  mailbox_sync_unhealthy: 'The Microsoft 365 mailbox sync for this sender is not healthy. Check Settings → Microsoft 365.',
+  sender_health_not_ready: 'Sender health is missing, not HEALTHY, or older than 24 hours.',
+  campaign_not_active: 'The campaign is not active.',
+  campaign_paused: 'The campaign automation mode is paused.',
+  tenant_automation_off: 'Tenant automation is off in Settings.',
+  tenant_suspended: 'This tenant is suspended.',
+  gateway_requires_https: 'The provider gateway URL must be HTTPS, or the internal http://gateway address.',
+  integration_or_database_error: 'This automation run failed unexpectedly. It has been retried and stopped after three attempts. Check the worker logs for the technical detail, then use Run now to try again.',
+  gateway_not_configured: 'No provider gateway URL is configured for this deployment. Set PROVIDER_GATEWAY_URL on the server, then run the campaign again.',
+  gateway_credential_missing: 'This workspace has no provider gateway API key. Add one in Settings, then approve or re-run the message.',
+  gateway_unreachable: 'The provider gateway could not be reached. Check that the gateway service is running and reachable from the app, then run the campaign again.',
+  gateway_timeout: 'The provider gateway did not answer in time. It may be overloaded; the run will retry automatically.',
+  gateway_invalid_response: 'The provider gateway replied with data LeadMelo could not read. Check the gateway logs and its version against docs/PROVIDER_GATEWAY.md.',
+  gateway_http_422: 'The discovery gateway rejected the request parameters. Check the campaign ICP targeting and retry.',
+  gateway_http_401: 'Authentication to the provider gateway failed. Please verify the gateway API key in Settings.',
+  gateway_http_403: 'Access to the provider gateway was forbidden for this tenant.',
+  gateway_http_502: 'The discovery provider gateway is unreachable or returned a bad gateway response. Check gateway service status and retry.',
+  gateway_http_503: 'The discovery provider gateway is temporarily busy or unavailable. The run will retry automatically.',
+  gateway_http_500: 'The discovery provider gateway encountered an internal server error. Please retry or check gateway service logs.',
+  gateway_http_409: 'The provider gateway is not configured for this tenant: it has no vendor (Apollo/Hunter) key or dummy-discovery setting. Add the key in gateway/tenants.json, or enable dummy discovery for testing, then run the campaign again.',
+  provider_exceeded_limit: 'The discovery provider returned more prospects than permitted by the cap.',
+  lease_expired_after_max_attempts: 'The run timed out across maximum retry attempts. Check system health and trigger a new run.',
+  max_attempts_exhausted: 'This run used all three attempts without completing. Fix the cause shown above, then use Run now to queue a fresh run.',
+  send_lease_exhausted: 'Email sending timed out across maximum retry attempts.',
+  daily_cap: 'Daily email cap reached for this campaign or tenant. Sending will resume in the next send window.',
+  postal_address_missing: 'The business postal address is missing in Settings.',
+  reverification_required: 'The contact’s email verification is missing or older than 7 days.'
 };
 
 const READY: Record<string, string> = {
@@ -44,5 +74,11 @@ export function userError(code: unknown): string {
     return `This campaign is not ready to start: ${list}. Open Settings to fix these.`;
   }
   if (raw.startsWith('ai_url_rejected:')) return `That AI URL was rejected: ${raw.slice('ai_url_rejected:'.length).trim()}`;
+  if (raw.startsWith('gateway_http_')) {
+    const status = raw.slice('gateway_http_'.length);
+    return MESSAGES[raw] ?? `Provider gateway returned HTTP ${status}. Please check gateway logs and retry.`;
+  }
+  // Codes with a curated sentence always win over the underscore-stripped fallback.
+  if (MESSAGES[raw]) return MESSAGES[raw];
   return MESSAGES[raw] ?? raw.replaceAll('_', ' ');
 }

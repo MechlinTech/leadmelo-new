@@ -11,9 +11,11 @@ import { unsubscribeToken } from '../../lib/unsubscribe.ts';
 import { createExperiment, setExperimentStatus } from '../../lib/experiments/index.ts';
 import { GET as getICPs, POST as createICP } from '../../app/api/icps/route.ts';
 import { POST as createCampaign, PATCH as patchCampaign } from '../../app/api/campaigns/route.ts';
+import { GET as listOutreach, PATCH as approveOutreach } from '../../app/api/outreach/route.ts';
 import { POST as login } from '../../app/api/auth/login/route.ts';
 import { POST as webhook } from '../../app/api/webhooks/provider/[tenantId]/route.ts';
 import { POST as unsubscribe } from '../../app/unsubscribe/route.ts';
+import { GET as listAppointments, PATCH as updateAppointment } from '../../app/api/appointments/route.ts';
 
 if (process.env.TEST_DATABASE_CONFIRM !== 'isolated') throw new Error('Use an isolated database and TEST_DATABASE_CONFIRM=isolated');
 process.env.NODE_ENV = 'test';
@@ -109,6 +111,11 @@ test('persisted multi-tenant campaign-to-booking flow', async t => {
       assert.equal(await db.enrollment.count({ where: { campaignId: campaign.id } }), 2);
       assert.equal(await db.outreachEvent.count({ where: { campaignId: campaign.id } }), 2);
       assert.equal((await db.automationRun.findFirst({ where: { campaignId: campaign.id } })).status, 'SUCCEEDED');
+      const queued = await db.outreachEvent.findFirstOrThrow({ where: { campaignId: campaign.id, status: 'QUEUED' } });
+      assert.equal((await approveOutreach(request('outreach', 'PATCH', { id: queued.id }))).status, 200);
+      const displayed = (await (await listOutreach(request('outreach'))).json()).find(event => event.id === queued.id);
+      assert.equal(displayed.status, 'QUEUED', 'the worker retains its durable queue state');
+      assert.equal(displayed.statusLabel, 'APPROVED', 'the UI sees the approval state explicitly');
     });
 
     await t.test('ambiguous provider acceptance retries with same key, respects cap and schedules follow-up once', async () => {
@@ -172,7 +179,22 @@ test('persisted multi-tenant campaign-to-booking flow', async t => {
       assert.equal((await call(signature)).status, 200);
       assert.equal((await call(signature)).status, 200);
       assert.equal(await db.appointment.count({ where: { tenantId: tenant.id } }), 1);
-      assert.equal((await db.appointment.findFirst({ where: { tenantId: tenant.id } })).qualified, true);
+      const appointment = await db.appointment.findFirstOrThrow({ where: { tenantId: tenant.id } });
+      assert.equal(appointment.qualified, true);
+      const member = await db.user.create({ data: { tenantId: tenant.id, email: `member-${Date.now()}@example.com`, role: 'MEMBER', passwordHash: hashPassword('long-test-password-123') } });
+      const memberCookie = `${sessionCookie}=${await createSession(member.id)}`;
+      assert.equal((await updateAppointment(request('appointments', 'PATCH', { id: appointment.id, outcome: 'WON', outcomeReason: 'Won' }, memberCookie))).status, 403);
+      const listed = await listAppointments(request('appointments'));
+      const listedAppointment = (await listed.json()).find(row => row.id === appointment.id);
+      assert.equal(listedAppointment.status, 'BOOKED');
+      assert.match(listedAppointment.bookingUrl, /utm_content=/, 'booking URL carries signed contact attribution');
+      for (const outcome of ['COMPLETED', 'NO_SHOW', 'DISQUALIFIED', 'WON', 'LOST']) {
+        assert.equal((await updateAppointment(request('appointments', 'PATCH', { id: appointment.id, outcome, outcomeReason: `Marked ${outcome}` }))).status, 200);
+        const refreshed = (await listAppointments(request('appointments'))).json();
+        const saved = (await refreshed).find(row => row.id === appointment.id);
+        assert.equal(saved.status, 'BOOKED', 'an outcome must not overwrite booking status');
+        assert.equal(saved.outcome, outcome, 'the selected outcome survives a fresh read');
+      }
       await handleProviderEvent(tenant.id, { ...event, id: 'canceled', type: 'booking.canceled', occurredAt: new Date().toISOString() });
       await handleProviderEvent(tenant.id, { ...event, id: 'old-created' });
       assert.equal((await db.appointment.findFirst({ where: { tenantId: tenant.id } })).status, 'CANCELED');

@@ -13,6 +13,7 @@ const serviceWorkerHeaders = [
 ];
 
 export default {
+  outputFileTracingRoot: process.cwd(),
   reactStrictMode: true,
   poweredByHeader: false,
   devIndicators: false,

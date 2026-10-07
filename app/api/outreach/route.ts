@@ -4,7 +4,8 @@ import { authenticate } from '../../../lib/auth';
 import { endpoint, HttpError, jsonBody } from '../../../lib/http';
 export const GET = endpoint(async req => {
   const user = await authenticate(req);
-  return Response.json(await db.outreachEvent.findMany({ where: { tenantId: user.tenantId }, include: { contact: true, campaign: { include: { sequenceSteps: true } } }, orderBy: { createdAt: 'desc' }, take: 100 }));
+  const events = await db.outreachEvent.findMany({ where: { tenantId: user.tenantId }, include: { contact: { include: { lead: true } }, campaign: { include: { sequenceSteps: true } } }, orderBy: { createdAt: 'desc' }, take: 100 });
+  return Response.json(events.map(event => ({ ...event, statusLabel: event.status === 'QUEUED' && event.approvedAt ? 'APPROVED' : event.status })));
 });
 export const PATCH = endpoint(async req => {
   const user = await authenticate(req, true);

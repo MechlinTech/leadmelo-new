@@ -66,14 +66,16 @@ test('operational detectors and tenant digest', async t => {
     const mkEvent = (data) => db.outreachEvent.create({ data: { tenantId: B.tenant.id, contactId: contact.id, leadId: lead.id, idempotencyKey: randomUUID(), ...data } });
     await mkEvent({ status: 'SENT', sentAt: new Date() });
     await mkEvent({ status: 'SENT', sentAt: new Date(Date.now() - 3 * 86400000) });
-    await mkEvent({ status: 'FAILED' });
+    await mkEvent({ status: 'FAILED', createdAt: new Date(Date.now() - 3 * 86400000), reservedAt: new Date() });
+    await mkEvent({ status: 'FAILED', createdAt: new Date(), reservedAt: new Date(Date.now() - 3 * 86400000) });
     await db.reply.create({ data: { tenantId: B.tenant.id, contactId: contact.id, intent: 'POSITIVE', rawSnippet: 'yes' } });
     await db.reply.create({ data: { tenantId: B.tenant.id, contactId: contact.id, intent: 'NEGATIVE', rawSnippet: 'no' } });
     await db.appointment.create({ data: { tenantId: B.tenant.id, campaignId: c.id, contactId: contact.id, providerEventId: randomUUID(), status: 'BOOKED', scheduledStart: new Date(Date.now() + 86400000), scheduledEnd: new Date(Date.now() + 88200000) } });
+    await db.appointment.create({ data: { tenantId: B.tenant.id, campaignId: c.id, contactId: contact.id, providerEventId: randomUUID(), status: 'CANCELED', createdAt: new Date(Date.now() - 3 * 86400000), providerUpdatedAt: new Date() } });
     await db.operationalAlert.deleteMany({ where: { tenantId: B.tenant.id } }); // clear alerts from the simulated "next day" run above
     await raiseOne(B.tenant.id);
     const d = await buildDigest(B.tenant.id);
-    assert.deepEqual(d.activity, { emailsSent: 1, emailsFailed: 1, replies: 2, positiveReplies: 1, meetingsBooked: 1, meetingsCancelled: 0 });
+    assert.deepEqual(d.activity, { emailsSent: 1, emailsFailed: 1, replies: 2, positiveReplies: 1, meetingsBooked: 1, meetingsCancelled: 1 });
     assert.equal((await buildDigest(B.tenant.id, new Date(), 168)).activity.emailsSent, 2, '7-day window includes older sends');
     assert.equal(d.upcomingMeetings, 1); assert.equal(d.activeCampaigns, 1);
     assert.deepEqual(d.openAlerts, { reply_review: 1 }); assert.equal(d.needsAttention, 1);

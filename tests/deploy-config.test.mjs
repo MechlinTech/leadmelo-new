@@ -10,7 +10,10 @@ import { parse } from 'yaml';
 const compose = parse(readFileSync('docker-compose.selfhosted.yml', 'utf8'), { merge: true });
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
 const envExample = readFileSync('.env.example', 'utf8');
-const envKeys = new Set(envExample.split('\n').map(l => /^([A-Z_]+)=/.exec(l)?.[1]).filter(Boolean));
+// Split on CRLF too: a Windows checkout (core.autocrlf) otherwise leaves a trailing \r on every
+// value and every equality check below fails for the wrong reason.
+const envLines = envExample.split(/\r?\n/);
+const envKeys = new Set(envLines.map(l => /^([A-Z_]+)=/.exec(l)?.[1]).filter(Boolean));
 const svc = compose.services;
 const posixOnly = process.platform === 'win32' && !process.env.FORCE_POSIX_TESTS ? { skip: 'requires POSIX bash' } : {};
 
@@ -50,7 +53,7 @@ test('every compose variable is documented in .env.example, and versions agree e
   assert.match(text, new RegExp(`RELEASE_TAG:-${pkg.version.replace(/\./g, '\\.')}`), 'compose default tag equals package.json version');
   assert.ok(envExample.includes(`RELEASE_TAG=${pkg.version}`), '.env.example RELEASE_TAG equals package.json version');
   assert.ok(readFileSync('package-lock.json', 'utf8').includes(`"version": "${pkg.version}"`));
-  assert.ok(!envExample.split('\n').some(l => /^(POSTGRES_PASSWORD|SESSION_SECRET|DATA_ENCRYPTION_KEY|APP_DB_PASSWORD)=(?!CHANGE_ME$)/.test(l)), '.env.example holds placeholders only');
+  assert.ok(!envLines.some(l => /^(POSTGRES_PASSWORD|SESSION_SECRET|DATA_ENCRYPTION_KEY|APP_DB_PASSWORD)=(?!CHANGE_ME$)/.test(l)), '.env.example holds placeholders only');
 });
 
 test('services run commands that exist, and the health checks target real routes', () => {

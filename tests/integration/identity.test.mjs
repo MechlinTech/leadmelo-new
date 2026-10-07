@@ -8,11 +8,14 @@ import { hotp, base32Decode, totpStep } from '../../lib/totp.ts';
 import { GET as listInvites, POST as createInvite, DELETE as revokeInvite } from '../../app/api/invites/route.ts';
 import { POST as acceptInvite } from '../../app/api/invites/accept/route.ts';
 import { POST as login } from '../../app/api/auth/login/route.ts';
+import { POST as logout } from '../../app/api/auth/logout/route.ts';
 import { POST as resetPassword } from '../../app/api/auth/reset/route.ts';
+import { POST as changePassword } from '../../app/api/auth/change-password/route.ts';
 import { POST as issueReset } from '../../app/api/users/[id]/reset/route.ts';
 import { POST as mfaSetup } from '../../app/api/auth/mfa/setup/route.ts';
 import { POST as mfaEnable } from '../../app/api/auth/mfa/enable/route.ts';
 import { POST as mfaDisable } from '../../app/api/auth/mfa/disable/route.ts';
+import { PATCH as updateUser } from '../../app/api/users/route.ts';
 
 if (process.env.TEST_DATABASE_CONFIRM !== 'isolated') throw new Error('isolated database required');
 process.env.DATA_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString('base64');
@@ -136,5 +139,36 @@ test('invitations, MFA and password reset', async t => {
     const third = tokenOf((await (await issueReset(req('x', 'POST', {}, A.cookie), params(target.id))).json()).resetUrl);
     await db.passwordReset.updateMany({ where: { usedAt: null, userId: target.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
     assert.equal((await resetPassword(req('auth/reset', 'POST', { token: third, password: 'another-long-pass-1' }))).status, 400, 'expired');
+  });
+  await t.test('password change verifies the current password and revokes active sessions', async () => {
+    assert.equal((await changePassword(req('auth/change-password', 'POST', { currentPassword: 'wrong-password-123', newPassword: 'changed-password-123' }, memberCookie))).status, 401);
+    assert.equal((await changePassword(req('auth/change-password', 'POST', { currentPassword: strong, newPassword: strong }, memberCookie))).status, 400);
+    const changed = await changePassword(req('auth/change-password', 'POST', { currentPassword: strong, newPassword: 'changed-password-123' }, memberCookie));
+    assert.equal(changed.status, 200);
+    assert.match(changed.headers.get('set-cookie'), /Max-Age=0/);
+    assert.equal(await db.session.count({ where: { userId: member.id } }), 0, 'all sessions are revoked');
+    assert.equal((await doLogin(member.email, strong)).status, 401, 'old password is rejected');
+    assert.equal((await doLogin(member.email, 'changed-password-123')).status, 200, 'new password works');
+  });
+  await t.test('user access changes are tenant-admin-only, tenant-scoped and revoke sessions', async () => {
+    const activeMemberCookie = `${sessionCookie}=${await createSession(member.id)}`;
+    assert.equal((await updateUser(req('users', 'PATCH', { id: member.id, disabled: true }, managerCookie))).status, 403);
+    assert.equal((await updateUser(req('users', 'PATCH', { id: member.id, disabled: true }, B.cookie))).status, 404);
+    assert.equal((await updateUser(req('users', 'PATCH', { id: A.user.id, disabled: true }, A.cookie))).status, 409, 'the last tenant administrator cannot be disabled');
+    assert.equal((await updateUser(req('users', 'PATCH', { id: A.user.id, disabled: true }, activeMemberCookie))).status, 403, 'members cannot change access');
+    assert.equal((await updateUser(req('users', 'PATCH', { id: manager.id, disabled: true }, A.cookie))).status, 200);
+    assert.equal((await db.session.count({ where: { userId: manager.id } })), 0);
+    assert.equal((await updateUser(req('users', 'PATCH', { id: manager.id, disabled: false }, A.cookie))).status, 200, 'admin can restore access');
+  });
+  await t.test('expired sessions are rejected and logout revokes the session and clears its cookie', async () => {
+    const logoutToken = await createSession(member.id);
+    const logoutCookie = `${sessionCookie}=${logoutToken}`;
+    await db.session.updateMany({ where: { userId: manager.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    assert.equal((await listInvites(req('invites', 'GET', undefined, managerCookie))).status, 401, 'expired session is rejected');
+    const response = await logout(req('auth/logout', 'POST', undefined, logoutCookie));
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('set-cookie'), /Max-Age=0/);
+    assert.equal(await db.session.count({ where: { userId: member.id } }), 0, 'logout deletes the persisted session');
+    assert.equal((await listInvites(req('invites', 'GET', undefined, logoutCookie))).status, 401);
   });
 });
