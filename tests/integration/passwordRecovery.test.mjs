@@ -8,7 +8,7 @@ import { POST as login } from '../../app/api/auth/login/route.ts';
 import { POST as resetPassword } from '../../app/api/auth/reset/route.ts';
 import { POST as forgotPassword } from '../../app/api/auth/forgot-password/route.ts';
 import { GET as listInvites } from '../../app/api/invites/route.ts';
-import { RESET_REQUEST_ANSWER, requestPasswordReset, resetLinkState } from '../../lib/passwordRecovery.ts';
+import { RESET_REQUEST_ANSWER, RESET_REQUESTS_PER_ADDRESS, RESET_REQUESTS_PER_CALLER, requestPasswordReset, resetLinkState } from '../../lib/passwordRecovery.ts';
 
 if (process.env.TEST_DATABASE_CONFIRM !== 'isolated') throw new Error('isolated database required');
 process.env.DATA_ENCRYPTION_KEY = Buffer.alloc(32, 3).toString('base64');
@@ -177,25 +177,35 @@ test('self-service forgot password: generic answers, secure links, and a working
   });
 
   await t.test('requests are rate limited per address and per caller', async () => {
+    assert.equal(RESET_REQUESTS_PER_ADDRESS, 10);
+    assert.equal(RESET_REQUESTS_PER_CALLER, 30);
     const owner = await mkUser('limited');
     const ip = caller();
     const statuses = [];
-    for (let i = 0; i < 4; i++) statuses.push((await forgotPassword(req('auth/forgot-password', 'POST', { email: owner.email }, '', ip))).status);
-    assert.deepEqual(statuses, [200, 200, 200, 429], 'the fourth request for one address is refused');
+    for (let i = 0; i < 11; i++) statuses.push((await forgotPassword(req('auth/forgot-password', 'POST', { email: owner.email }, '', ip))).status);
+    assert.deepEqual(statuses, [...Array(10).fill(200), 429], 'the eleventh request for one address is refused');
     assert.equal((await (await forgotPassword(req('auth/forgot-password', 'POST', { email: owner.email }, '', ip))).json()).error, 'rate_limit_exceeded');
     // The per-address budget is enforced before the lookup, so an unknown address is
     // throttled identically and cannot be used as an existence oracle.
     const other = caller();
     const stranger = `nolimit-${randomUUID()}@example.com`;
     const unknown = [];
-    for (let i = 0; i < 4; i++) unknown.push((await forgotPassword(req('auth/forgot-password', 'POST', { email: stranger }, '', other))).status);
+    for (let i = 0; i < 11; i++) unknown.push((await forgotPassword(req('auth/forgot-password', 'POST', { email: stranger }, '', other))).status);
     assert.deepEqual(unknown, statuses, 'an unknown address is throttled in exactly the same way');
-    // And the per-caller budget still applies on its own.
+    // The per-caller budget is a loose backstop, not the control that protects one inbox:
+    // many different addresses from one host must all be allowed.
     const burst = caller();
     const burstStatuses = [];
-    for (let i = 0; i < 7; i++) burstStatuses.push((await forgotPassword(req('auth/forgot-password', 'POST', { email: `burst-${randomUUID()}@example.com` }, '', burst))).status);
-    assert.equal(burstStatuses.filter(s => s === 200).length, 5, 'a single caller gets five requests an hour');
-    assert.ok(burstStatuses.slice(5).every(s => s === 429));
+    for (let i = 0; i < 12; i++) burstStatuses.push((await forgotPassword(req('auth/forgot-password', 'POST', { email: `burst-${randomUUID()}@example.com` }, '', burst))).status);
+    assert.ok(burstStatuses.every(s => s === 200), 'one caller may reach several different addresses without being locked out');
+  });
+
+  await t.test('a shared office address cannot lock a whole team out', async () => {
+    // Regression: a 5/hour per-IP cap meant one person retrying locked out everyone behind
+    // the same NAT, because the bucket counts every address that host asked about.
+    const shared = caller();
+    const users = await Promise.all([mkUser('office1'), mkUser('office2'), mkUser('office3'), mkUser('office4')]);
+    for (const user of users) assert.equal((await forgotPassword(req('auth/forgot-password', 'POST', { email: user.email }, '', shared))).status, 200);
   });
 
   await t.test('no password, token or credential is logged', async () => {

@@ -14,12 +14,13 @@ import { sendPlatformNotice } from './m365/send';
 // The only answer this flow gives for a well-formed address, registered or not.
 export const RESET_REQUEST_ANSWER = 'If an account exists for this email address, you’ll receive a password-reset link shortly.';
 
-// Per-address budget, applied before the account lookup so an unknown address and a
-// registered one are throttled identically (and neither is distinguishable).
-export const RESET_REQUESTS_PER_ADDRESS = 3;
-// Per-caller and installation-wide budgets, enforced by the endpoint.
-export const RESET_REQUESTS_PER_CALLER = 5;
-export const RESET_REQUESTS_TOTAL = 100;
+// Budgets, all per rolling hour. The per-address cap is the control that actually protects
+// one person's inbox from repeated mail; the per-caller cap is only a coarse backstop against
+// one host enumerating addresses, so it must stay loose enough that an office or a NAT shared
+// by a whole team never locks legitimate people out.
+export const RESET_REQUESTS_PER_ADDRESS = 10;
+export const RESET_REQUESTS_PER_CALLER = 30;
+export const RESET_REQUESTS_TOTAL = 500;
 
 export const resetRequestEmail = z.string().trim().toLowerCase().email().max(254);
 
@@ -56,6 +57,8 @@ function passwordResetEmail(email: string, resetUrl: string, alreadyHasPassword:
 // address is registered.
 export async function requestPasswordReset(rawEmail: unknown, now = new Date(), send: typeof sendPlatformNotice = sendPlatformNotice) {
   const email = requireResetEmail(rawEmail);
+  // Enforced before the lookup, so an unknown address and a registered one are throttled
+  // identically and neither can be used as an existence oracle.
   await rateLimit(`password-reset-request:email:${hashToken(email)}`, RESET_REQUESTS_PER_ADDRESS, 60);
 
   const user = await db.user.findUnique({ where: { email }, select: { id: true, tenantId: true, disabled: true, passwordHash: true } });
