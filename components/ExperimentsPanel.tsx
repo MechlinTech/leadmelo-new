@@ -30,7 +30,7 @@ export default function ExperimentsPanel() {
       {items.map(x => {
         const campaign = campaigns.find(c => c.id === x.campaignId), open = x.recommendations.find(r => r.status === 'OPEN'), res = results[x.id];
         return <li key={x.id}>
-          <div className="toolbar"><strong>{x.name}</strong><span className="pill">{x.status.toLowerCase()}</span></div>
+          <div className="toolbar"><strong title={x.name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{x.name}</strong><span className="pill">{x.status.toLowerCase()}</span></div>
           <p className="muted">{campaign?.name ?? 'Campaign'} · email {x.stepOrder} · goal: {x.primaryMetric.replace('_', ' ').toLowerCase()} · minimum {x.minSample} sends per variant</p>
           <div className="hero-actions" style={{ marginTop: 0 }}>
             {(x.status === 'DRAFT' || x.status === 'STOPPED') && <button type="button" disabled={busy} onClick={() => void run(() => api('experiments', 'PATCH', { id: x.id, status: 'RUNNING' }), 'Experiment started.')}>Start</button>}
