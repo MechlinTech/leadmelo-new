@@ -1,6 +1,8 @@
 'use client';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import Pager, { pageSlice } from './Pager';
+import { showToast } from './Toaster';
 
 type Variant = { id: string; label: string; isControl: boolean; weight: number };
 type Rec = { id: string; variantId: string; status: string; verdict: { status?: string } };
@@ -12,22 +14,25 @@ const VERDICT_TEXT: Record<string, string> = { INSUFFICIENT_DATA: 'Not enough se
 const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(1)}%` : '–');
 
 export default function ExperimentsPanel() {
-  const [items, setItems] = useState<Experiment[] | null>(null), [campaigns, setCampaigns] = useState<Campaign[]>([]), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  const [items, setItems] = useState<Experiment[] | null>(null), [campaigns, setCampaigns] = useState<Campaign[]>([]), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [results, setResults] = useState<Record<string, Results>>({});
+  const [page, setPage] = useState(1);
   const load = useCallback(async () => { try { setItems(await api<Experiment[]>('experiments')); setCampaigns(await api<Campaign[]>('campaigns')); } catch (e) { setError((e as Error).message); } }, []);
   useEffect(() => { void load(); }, [load]);
-  async function run(fn: () => Promise<void>, done?: string) { setBusy(true); setError(''); setNotice(''); try { await fn(); if (done) setNotice(done); await load(); } catch (e) { setError(friendly((e as Error).message)); } finally { setBusy(false); } }
+  async function run(fn: () => Promise<void>, done?: string) { setBusy(true); setError(''); try { await fn(); if (done) showToast(done); await load(); } catch (e) { showToast(friendly((e as Error).message), 'error'); } finally { setBusy(false); } }
   const friendly = (m: string) => m.startsWith('plan_limit') ? 'Your plan does not allow another experiment right now. See Settings, then Plan and usage.' : m === 'already_exists' ? 'Another experiment is already running on that step.' : m === 'experiment_running_on_step' ? 'That step is under test; stop the experiment before editing its copy.' : m;
   const create = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const f = new FormData(e.currentTarget), form = e.currentTarget; return run(async () => {
     await api('experiments', 'POST', { campaignId: f.get('campaignId'), stepOrder: Number(f.get('stepOrder')), name: f.get('name'), primaryMetric: f.get('primaryMetric'), minSample: Number(f.get('minSample')), variants: [{ label: String(f.get('label')), subject: f.get('subject'), body: f.get('body') }] });
     form.reset();
   }, 'Experiment created as a draft. Start it when you are ready.'); };
 
+  const pageData = items ? pageSlice(items, page, 10) : null;
+
   return <>
-    {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {error && <p role="alert" className="error" style={{ marginBottom: 16 }}>{error}</p>}
     <p className="muted">Test alternative subject and body copy on one email step. Results are only compared once each arm has enough sends; a winner is recommended, and you decide whether to apply it. This tests copy only.</p>
-    {!items ? <p role="status" className="muted">Loading experiments…</p> : items.length === 0 ? <p className="muted">No experiments yet.</p> : <ul className="recordList">
-      {items.map(x => {
+    {!items ? <p role="status" className="muted">Loading experiments…</p> : items.length === 0 ? <p className="muted">No experiments yet.</p> : <><ul className="recordList">
+      {pageData!.slice.map(x => {
         const campaign = campaigns.find(c => c.id === x.campaignId), open = x.recommendations.find(r => r.status === 'OPEN'), res = results[x.id];
         return <li key={x.id}>
           <div className="toolbar"><strong title={x.name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{x.name}</strong><span className="pill">{x.status.toLowerCase()}</span></div>
@@ -46,7 +51,8 @@ export default function ExperimentsPanel() {
             <div className="hero-actions"><button type="button" disabled={busy} onClick={() => void run(() => api(`experiments/${open.id}/decision`, 'POST', { decision: 'accept' }), 'Applied as a new campaign version.')}>Apply winner</button><button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api(`experiments/${open.id}/decision`, 'POST', { decision: 'reject' }), 'Recommendation rejected.')}>Reject</button></div></div>}
         </li>;
       })}
-    </ul>}
+    </ul>
+    <Pager page={pageData!.page} pages={pageData!.pages} total={pageData!.total} label="experiments" onPage={setPage} /></>}
     <h2>New experiment</h2>
     <form className="editor" onSubmit={create}>
       <div className="formGrid">

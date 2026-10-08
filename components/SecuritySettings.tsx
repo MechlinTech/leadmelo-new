@@ -2,18 +2,19 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { userError } from '../lib/userErrors';
+import { showToast } from './Toaster';
 
 type Invite = { id: string; email: string; role: string; expiresAt: string };
 export default function SecuritySettings() {
-  const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [mfa, setMfa] = useState<{ secret: string; otpauthUri: string } | null>(null), [codes, setCodes] = useState<string[] | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]), [link, setLink] = useState('');
   const loadInvites = useCallback(async () => { try { setInvites(await api('invites')); } catch (e) { setError((e as Error).message); } }, []);
   useEffect(() => { void loadInvites(); }, [loadInvites]);
-  async function run(fn: () => Promise<void>) { setBusy(true); setError(''); setNotice(''); try { await fn(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
+  async function run(fn: () => Promise<void>) { setBusy(true); setError(''); try { await fn(); } catch (e) { showToast((e as Error).message, 'error'); } finally { setBusy(false); } }
   const invite = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const form = e.currentTarget; const data = new FormData(form); return run(async () => {
     const r = await api<{ acceptUrl: string; emailed?: boolean; emailError?: string }>('invites', 'POST', { email: data.get('email'), role: data.get('role') });
-    setLink(r.emailed ? '' : r.acceptUrl); setNotice(r.emailed ? 'Invitation email sent. It includes the link to join this workspace.' : `${userError(r.emailError)} Copy the link below and send it to the person; it is shown only once.`); form.reset(); await loadInvites();
+    setLink(r.emailed ? '' : r.acceptUrl); showToast(r.emailed ? 'Invitation email sent. It includes the link to join this workspace.' : `${userError(r.emailError)} Copy the link below and send it to the person; it is shown only once.`); form.reset(); await loadInvites();
   }); };
   const enable = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const data = new FormData(e.currentTarget); return run(async () => {
     setCodes((await api<{ recoveryCodes: string[] }>('auth/mfa/enable', 'POST', { code: String(data.get('code')) })).recoveryCodes); setMfa(null);
@@ -26,7 +27,7 @@ export default function SecuritySettings() {
     return run(async () => {
       try {
         await api('auth/change-password', 'POST', { currentPassword: String(data.get('currentPassword') ?? ''), newPassword });
-        setNotice('Password changed. Your sessions were signed out; sign in again to continue.');
+        showToast('Password changed. Your sessions were signed out; sign in again to continue.');
         form.reset();
       } catch (e) {
         const code = (e as Error).message;
@@ -39,7 +40,7 @@ export default function SecuritySettings() {
   return <>
   <section aria-labelledby="security-title">
     <h2 id="security-title">Your sign-in security</h2>
-    {error && <p role="alert" className="error">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {error && <p role="alert" className="error" style={{ marginBottom: 16 }}>{error}</p>}
     <form className="editor" onSubmit={changePassword}>
       <h3>Change password</h3>
       <label>Current password<input className="input" name="currentPassword" type="password" autoComplete="current-password" required/></label>

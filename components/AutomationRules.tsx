@@ -2,6 +2,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { api } from './api';
 import { useAppRole } from './AppRole';
+import { showToast } from './Toaster';
 
 type Rule = { id: string; name: string; enabled: boolean; system?: boolean; when: string; action: string };
 type Config = { alerts: { inApp: boolean; recipients: string[]; webhookUrl: string | null; codes: Record<string, boolean> }; rules: Rule[] };
@@ -10,13 +11,13 @@ const ACTION = [['raise_alert', 'Raise an alert'], ['pause_active_campaigns', 'P
 
 export default function AutomationRules() {
   const { canWrite } = useAppRole();
-  const [config, setConfig] = useState<Config | null>(null), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
+  const [config, setConfig] = useState<Config | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   async function load() { setConfig(await api<Config>('workspace-config')); }
   useEffect(() => { load().catch(e => setError((e as Error).message)); }, []);
   async function save(next: Config) {
-    setBusy(true); setError(''); setNotice('');
-    try { setConfig(await api<Config>('workspace-config', 'PUT', next)); setNotice('Rules saved.'); }
-    catch (e) { setError((e as Error).message); }
+    setBusy(true); setError('');
+    try { setConfig(await api<Config>('workspace-config', 'PUT', next)); showToast('Rules saved.'); }
+    catch (e) { showToast((e as Error).message, 'error'); }
     finally { setBusy(false); }
   }
   function toggle(id: string, enabled: boolean) {
@@ -48,8 +49,7 @@ export default function AutomationRules() {
   return <section aria-labelledby="rules-title">
     <h2 id="rules-title">Automation rules</h2>
     <p>Built-in rules are the worker’s defaults. You can switch them off, or add a rule that pauses every active campaign when a chosen event happens.</p>
-    {error && <p role="alert" className="error">{error}</p>}
-    {notice && <p role="status">{notice}</p>}
+    {error && <p role="alert" className="error" style={{ marginBottom: 16 }}>{error}</p>}
     <h3>Built-in</h3>
     <ul className="recordList">{system.map(r => <li key={r.id}><strong>{r.name}</strong><p className="muted">When {r.when.replaceAll('_', ' ')} → {r.action.replaceAll('_', ' ')}</p>{canWrite && <label><input type="checkbox" checked={r.enabled} disabled={busy} onChange={e => toggle(r.id, e.target.checked)} /> Enabled</label>}</li>)}</ul>
     <h3>Your rules</h3>

@@ -35,7 +35,26 @@ async function createLead(tenantId: string, body: z.infer<typeof leadInput>, sou
 
 export const GET = endpoint(async req => {
   const user = await authenticate(req);
-  return Response.json(await db.lead.findMany({ where: { tenantId: user.tenantId }, orderBy: { createdAt: 'desc' }, take: 500 }));
+  return Response.json(await db.lead.findMany({
+    where: { tenantId: user.tenantId },
+    include: {
+      outreachEvents: {
+        select: { campaign: { select: { name: true } } },
+        take: 1
+      },
+      contacts: {
+        select: {
+          enrollments: {
+            select: { campaign: { select: { name: true } } },
+            take: 1
+          }
+        },
+        take: 1
+      }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 500
+  }));
 });
 
 export const POST = endpoint(async req => {
