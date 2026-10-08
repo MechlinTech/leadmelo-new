@@ -299,7 +299,7 @@ export default function Workspace({ section }: { section: Section }) {
                   </td>
                   <td style={{ padding: '16px 12px', verticalAlign: 'middle' }}>
                     {canWrite ? 
-                      <select aria-label="Record meeting outcome" style={{ width: '100%', minWidth: '130px', padding: '6px 8px', fontSize: '14px' }} value={['COMPLETED', 'NO_SHOW', 'DISQUALIFIED', 'WON', 'LOST'].includes(r.status) ? r.status : ""} disabled={busy || r.status === 'CANCELED'} onChange={e => { if (e.target.value) void mutate('appointments', 'PATCH', { id: r.id, status: e.target.value, outcomeReason: 'Recorded by meeting owner' }); }}>
+                      <select aria-label="Record meeting outcome" style={{ width: '100%', minWidth: '130px', padding: '6px 8px', fontSize: '14px' }} value={r.outcome || ""} disabled={busy || r.status === 'CANCELED'} onChange={e => { if (e.target.value) void mutate('appointments', 'PATCH', { id: r.id, outcome: e.target.value, outcomeReason: 'Recorded by meeting owner' }); }}>
                         <option value="">Record outcome</option>
                         {['COMPLETED', 'NO_SHOW', 'DISQUALIFIED', 'WON', 'LOST'].map(v => <option key={v} value={v}>{v.replaceAll('_', ' ')}</option>)}
                       </select> 
