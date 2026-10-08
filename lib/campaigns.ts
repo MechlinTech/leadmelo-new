@@ -1,7 +1,12 @@
 import { db } from './db';
 import { HttpError } from './http';
 import { SENDER_HEALTH_AUTO, refreshSenderHealth } from './senderHealth';
-export async function campaignReady(tenantId: string, campaignId: string) {
+// Sender health is reported but does not block activation. A BLOCKED or stale sender is enforced
+// at send time (policy.ts `sender_health_not_ready`), so allowing a campaign to be activated lets
+// an operator build and approve the campaign while the sender recovers, instead of hard-blocking
+// setup behind a condition that only clears when real outreach resumes. Activation used to 409
+// with fresh_sender_health, which left the campaign stuck in DRAFT for weeks.
+export async function campaignReady(tenantId: string, campaignId: string, opts: { allowUnhealthySender?: boolean } = {}) {
   const c = await db.campaign.findFirst({ where: { id: campaignId, tenantId }, include: { icp: true, sequenceSteps: true } });
   if (!c) throw new HttpError(404, 'campaign_not_found');
   const s = await db.tenantSetting.findUnique({ where: { tenantId } });
@@ -18,8 +23,9 @@ export async function campaignReady(tenantId: string, campaignId: string) {
   if (!s?.automationEnabled) missing.push('tenant_automation_enabled');
   if (!s?.gatewayKey || !s?.webhookSecret || !process.env.PROVIDER_GATEWAY_URL) missing.push('provider_gateway');
   if (!s?.postalAddress) missing.push('postal_address');
-  if (!d || d.status !== 'HEALTHY' || !d.lastCheckedAt || Date.now() - d.lastCheckedAt.getTime() > 86400000) missing.push('fresh_sender_health');
   if (process.env.OUTBOUND_ENABLED !== 'true') missing.push('operator_outbound_enabled');
   if (missing.length) throw new HttpError(409, `campaign_not_ready:${missing.join(',')}`);
-  return c;
+  const senderHealthReady = !!d && d.status === 'HEALTHY' && !!d.lastCheckedAt && Date.now() - d.lastCheckedAt.getTime() <= 86400000;
+  if (!senderHealthReady && !opts.allowUnhealthySender) throw new HttpError(409, 'campaign_not_ready:fresh_sender_health');
+  return { campaign: c, senderHealthReady };
 }

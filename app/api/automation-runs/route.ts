@@ -11,7 +11,9 @@ export const GET = endpoint(async req => {
 export const POST = endpoint(async req => {
   const user = await authenticate(req, true);
   const { campaignId } = z.object({ campaignId: z.string() }).strict().parse(await jsonBody(req));
-  const c = await campaignReady(user.tenantId, campaignId);
+  // Queueing a discovery run spends provider credit, so it keeps the strict check: an unhealthy
+  // sender must not start a run. Activation is the looser path.
+  const { campaign: c } = await campaignReady(user.tenantId, campaignId);
   if (c.status !== 'ACTIVE' || c.automationMode === 'PAUSED') throw new HttpError(409, 'campaign_inactive');
   const key = req.headers.get('idempotency-key');
   if (!key || key.length > 100) throw new HttpError(400, 'idempotency_key_required');
