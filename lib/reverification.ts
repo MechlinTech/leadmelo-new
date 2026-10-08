@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { db } from './db';
-import { gateway } from './providers';
+import { gatewayWithCredentialSync } from './providerCredentials';
 import { suppress } from './webhooks';
 
 export const verificationResult = z.object({email:z.string().email(), verification:z.enum(['VALID','INVALID','RISKY','UNKNOWN']), verifiedAt:z.string().datetime()}).strict();
@@ -13,7 +13,7 @@ export async function processReverification(now = new Date()) {
   const claimed = await db.contact.updateMany({where:{id:c.id,verificationAttempts:c.verificationAttempts,OR:[{verificationLeaseUntil:null},{verificationLeaseUntil:{lt:now}}]},data:{verificationAttempts:{increment:1},verificationLeaseUntil:new Date(now.getTime()+120000)}});
   if (!claimed.count) return false;
   try {
-    const result = await gateway(settings.gatewayKey,'verify',`verify:${c.id}:${c.reverifyRequestedAt!.toISOString()}`,{tenantId:c.tenantId,contactId:c.id,email:c.email},verificationResult);
+    const result = await gatewayWithCredentialSync(c.tenantId,settings.gatewayKey,'verify',`verify:${c.id}:${c.reverifyRequestedAt!.toISOString()}`,{tenantId:c.tenantId,contactId:c.id,email:c.email},verificationResult);
     const checked = new Date(result.verifiedAt);
     if (result.email.toLowerCase() !== c.email.toLowerCase() || checked > now || now.getTime()-checked.getTime()>3600000) throw new Error('invalid_verification_evidence');
     if (result.verification === 'UNKNOWN') throw new Error('verification_pending');

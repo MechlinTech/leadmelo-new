@@ -53,6 +53,10 @@ export const settingsInput = z.object({
   weeklyProspectCap: z.number().int().min(1).max(5000),
   postalAddress: z.string().trim().min(10).max(500),
   gatewayKey: z.string().min(16).max(2000).optional(),
+  // Vendor keys for the provider gateway. Encrypted at rest; the gateway is told separately, because
+  // it holds no database credentials and reads them over its own bearer-authenticated endpoint.
+  apolloKey: z.string().min(8).max(2000).optional(),
+  hunterKey: z.string().min(8).max(2000).optional(),
   webhookSecret: z.string().min(32).max(256).optional(),
   calendlySigningKey: z.string().min(16).max(256).optional(),
   // Personal access token / OAuth token used only to READ scheduled events for missed-webhook reconciliation.

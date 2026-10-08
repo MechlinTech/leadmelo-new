@@ -561,6 +561,8 @@ model TenantSetting {
   automationEnabled  Boolean @default(false)
   postalAddress      String?
   gatewayKey         String?
+  apolloKey          String?
+  hunterKey          String?
   webhookSecret      String?
   calendlySigningKey String?
   monthlySpendCapCents Int?

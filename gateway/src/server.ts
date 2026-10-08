@@ -7,12 +7,18 @@ import { discover } from './discover';
 import { discoverDummy } from './dummyDiscover';
 import { GatewayHttpError, VendorError } from './errors';
 import { GatewayStore } from './store';
-import type { GatewayConfig, TenantBinding } from './config';
+import { persistTenants, type GatewayConfig, type TenantBinding } from './config';
 
 const list = z.array(z.string().max(200)).max(100).default([]);
 const icpSchema = z.object({ industries: list, companySizes: list, geographies: list, technologies: list, buyingSignals: list, buyerTitles: list, exclusionRules: list }).passthrough();
 const discoverReq = z.object({ tenantId: z.string().min(1).max(100), campaignId: z.string().min(1).max(100), icp: icpSchema, limit: z.number().int().min(0).max(100) }).strict();
 const verifyReq = z.object({ tenantId: z.string().min(1).max(100), contactId: z.string().min(1).max(100), email: z.string().email().max(254) }).strict();
+// Vendor keys are optional so a partial update is possible; null clears one. Lengths mirror the
+// vendor minimums (8) and the plaintext ceiling LeadMelo enforces (2000).
+const credentialReq = z.object({
+  apolloKey: z.string().min(8).max(2000).nullable().optional(),
+  hunterKey: z.string().min(8).max(2000).nullable().optional()
+}).strict();
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const sleep = (ms: number) => new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), ms));
 
@@ -35,9 +41,29 @@ export function createGatewayServer(config: GatewayConfig, deps: { fetcher?: typ
   async function handle(req: IncomingMessage, res: ServerResponse) {
     const path = new URL(req.url ?? '/', 'http://gateway').pathname;
     if (req.method === 'GET' && path === '/health') return send(res, 200, { ok: true });
-    if (req.method !== 'POST' || !['/discover', '/verify', '/send'].includes(path)) throw new GatewayHttpError(404, 'not_found');
     const bearer = /^Bearer (.{16,512})$/.exec(String(req.headers.authorization ?? ''))?.[1];
     const binding: TenantBinding | undefined = bearer ? config.tenants.get(sha256(bearer)) : undefined;
+
+    // Vendor credentials, managed from LeadMelo Settings. The bearer token is already this tenant's
+    // identity here, so it authenticates the write too: a tenant can only ever replace its own keys,
+    // and no new shared secret or database credential is introduced. Responses carry booleans only.
+    if (path === '/credentials') {
+      if (!binding) throw new GatewayHttpError(401, 'unauthorized');
+      if (req.method === 'GET') {
+        log('credentials_read', { tenant: binding.tenantId });
+        return send(res, 200, { tenantId: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey });
+      }
+      if (req.method !== 'PUT') throw new GatewayHttpError(404, 'not_found');
+      const body = credentialReq.parse(await readJson(req));
+      // An omitted field leaves the stored key alone; an explicit null clears it.
+      if (body.apolloKey !== undefined) binding.apolloKey = body.apolloKey ?? undefined;
+      if (body.hunterKey !== undefined) binding.hunterKey = body.hunterKey ?? undefined;
+      const persisted = persistTenants(config);
+      log('credentials_updated', { tenant: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey, persisted });
+      return send(res, 200, { ok: true, tenantId: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey, persisted });
+    }
+
+    if (req.method !== 'POST' || !['/discover', '/verify', '/send'].includes(path)) throw new GatewayHttpError(404, 'not_found');
     if (!binding) throw new GatewayHttpError(401, 'unauthorized');
     const idempotencyKey = String(req.headers['idempotency-key'] ?? '');
     if (idempotencyKey.length < 8 || idempotencyKey.length > 200) throw new GatewayHttpError(400, 'idempotency_key_required');
