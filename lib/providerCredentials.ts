@@ -51,12 +51,21 @@ function gatewayBase(): URL {
   try { url = new URL(configured); } catch { throw new HttpError(409, 'gateway_not_configured'); }
   const allowHttp = ['127.0.0.1', 'localhost', 'gateway'].includes(url.hostname);
   if (url.protocol !== 'https:' && !allowHttp) throw new HttpError(409, 'gateway_requires_https');
-  url.pathname = url.pathname.replace(/\/$/, '');
   url.search = '';
   return url;
 }
 
 export type GatewaySync = { ok: boolean; apollo: boolean; hunter: boolean };
+
+/**
+ * Append a gateway path in a single assignment. Assigning `url.pathname = ''` does not stick: the URL
+ * parser normalises an empty path back to '/', so appending afterwards produced '//credentials'. The
+ * gateway answered that with 404, which the UI then reported as "this gateway build has no credential
+ * endpoint" -- a wrong diagnosis that sent the operator looking for a version problem.
+ */
+function gatewayPath(url: URL, path: string): string {
+  return `${url.pathname.replace(/\/+$/, '')}${path}`;
+}
 
 /**
  * Call the gateway, pushing this tenant's vendor keys first if the gateway says it has none.
@@ -89,7 +98,7 @@ export async function pushCredentialsToGateway(tenantId: string, secrets?: Provi
   const s = secrets ?? await loadProviderSecrets(tenantId);
   if (!s.gatewayKey) throw new HttpError(409, 'gateway_credential_missing');
   const url = gatewayBase();
-  url.pathname += '/credentials';
+  url.pathname = gatewayPath(url, '/credentials');
   let res: Response;
   try {
     res = await fetch(url, {
@@ -115,7 +124,7 @@ export async function gatewayCredentialState(tenantId: string, secrets?: Provide
   if (!s.gatewayKey) return null;
   try {
     const url = gatewayBase();
-    url.pathname += '/credentials';
+    url.pathname = gatewayPath(url, '/credentials');
     const res = await fetch(url, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Authorization: `Bearer ${s.gatewayKey}` } });
     if (!res.ok) return null;
     const body = await res.json().catch(() => ({}));
@@ -188,7 +197,7 @@ export async function probeGateway(secrets: ProviderSecrets, fetcher: typeof fet
   if (!secrets.gatewayKey) return { ok: false, code: 'gateway_credential_missing', detail: 'No bearer token is saved for this workspace yet.' };
   try {
     const url = gatewayBase();
-    url.pathname += '/credentials';
+    url.pathname = gatewayPath(url, '/credentials');
     const res = await fetcher(url, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Authorization: `Bearer ${secrets.gatewayKey}` } });
     if (res.status === 401) return { ok: false, code: 'gateway_http_401', detail: 'The gateway does not recognise this bearer token. Its tenants file must contain this token’s SHA-256 bound to this workspace.' };
     if (res.status === 404) return { ok: false, code: 'gateway_credentials_unsupported', detail: 'This gateway build has no credential endpoint. Restart it on a version that supports PUT /credentials.' };
