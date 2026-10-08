@@ -105,7 +105,11 @@ export async function processRun(now = new Date()) {
           await tx.outreachEvent.upsert({
             where: { idempotencyKey: outreachKey },
             create: { tenantId: c.tenantId, campaignId: c.id, contactId: contact.id, leadId: lead.id, stepOrder: first.stepOrder, scheduledAt, idempotencyKey: outreachKey },
-            update: { status: 'QUEUED', scheduledAt, approvedAt: null, error: null, attempts: 0, leaseUntil: null, leaseToken: null, reservedAt: null, providerMessageId: null, sentAt: null, subject: null, body: null }
+            // createdAt is bumped so a re-queued message sorts as the newest row. The outreach
+            // queue is ordered by createdAt and only the newest 25 are rendered, so reusing the
+            // original creation time left every re-queued message stranded below the fold: the
+            // run reported messagesQueued, but nothing new ever appeared in the queue.
+            update: { status: 'QUEUED', scheduledAt, approvedAt: null, error: null, attempts: 0, leaseUntil: null, leaseToken: null, reservedAt: null, providerMessageId: null, sentAt: null, subject: null, body: null, createdAt: now }
           });
           // The outreach key is reused. A prior MailReceipt would reject the new body
           // with m365_idempotency_conflict, or return the old ACCEPTED send and skip it.
@@ -327,7 +331,17 @@ async function processOutreachRow(candidate: OutreachCandidate, now: Date): Prom
             // upsert with an empty update keeps an already-queued/sent step untouched, so a
             // re-send or a duplicate worker tick cannot create a second follow-up.
             const scheduledAt = followUpDueAt({ from: sentAt, waitBusinessDays: next.waitBusinessDays, timezone: c.timezone, holidays: c.holidays, qaMinutes: qaFollowUpDelayMinutes() });
-            await tx.outreachEvent.upsert({ where: { idempotencyKey: `${c.id}:${contact.id}:${next.stepOrder}` }, update: {}, create: { tenantId: e.tenantId, campaignId: c.id, contactId: contact.id, leadId: e.leadId, stepOrder: next.stepOrder, idempotencyKey: `${c.id}:${contact.id}:${next.stepOrder}`, scheduledAt } });
+            // A follow-up inherits the approval of the message that produced it. In
+            // REVIEW_BEFORE_SEND the operator approved this prospect's message, so every later
+            // step used to sit at awaiting_approval and needed a second click; with a 5-minute
+            // delay that made the reminder undeliverable on schedule. Inheriting keeps the
+            // review-before-send gate on the FIRST message of a sequence, which is where the
+            // operator actually reads the copy, and lets an approved sequence run on its own.
+            // In FULLY_AUTOMATIC there is no approval to inherit and the gate does not apply,
+            // so nothing changes for those campaigns.
+            const approvedAt = fresh.approvedAt ?? null;
+            if (approvedAt) console.log(JSON.stringify({ event: 'followup_approval_inherited', key: `${c.id}:${contact.id}:${next.stepOrder}`, stepOrder: next.stepOrder, campaignId: c.id, scheduledAt: scheduledAt.toISOString() }));
+            await tx.outreachEvent.upsert({ where: { idempotencyKey: `${c.id}:${contact.id}:${next.stepOrder}` }, update: {}, create: { tenantId: e.tenantId, campaignId: c.id, contactId: contact.id, leadId: e.leadId, stepOrder: next.stepOrder, approvedAt, idempotencyKey: `${c.id}:${contact.id}:${next.stepOrder}`, scheduledAt } });
           }
           else await tx.enrollment.update({ where: { id: enrollment.id }, data: { stoppedAt: now, stopReason: 'sequence_complete' } });
         }

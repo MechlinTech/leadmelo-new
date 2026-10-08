@@ -100,6 +100,8 @@ export function normalizeCalendlyEvent(tenantId: string, envelopeInput: unknown,
   const occurredAt = new Date(created ? envelope.created_at : payload.cancellation?.created_at ?? envelope.created_at).toISOString();
   return {
     attribution, inviteeEmail: payload.email.toLowerCase(),
+    // event.email stays exactly as stored: handleProviderEvent uses it to find the contact by
+    // its unique (tenantId, email) key, so lowercasing it here would break contact resolution.
     event: { id: `calendly:${envelope.event}:${payload.uri}:${envelope.created_at}`, occurredAt, type: created ? 'booking.created' : 'booking.canceled', campaignId: attribution.campaignId, email, bookingId: payload.uri, start, end, timezone: payload.timezone ?? 'UTC', eventUrl: payload.scheduled_event.uri }
   };
 }

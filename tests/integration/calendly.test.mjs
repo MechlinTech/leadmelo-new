@@ -69,4 +69,34 @@ test('Calendly webhook creates, dedupes, orders and cancels bookings with signed
     assert.equal(await db.operationalAlert.count({ where: { tenantId: tenant.id, code: 'booking_invitee_mismatch' } }), 1);
     assert.equal((await appointment()).length, 2);
   });
+  await t.test('the same mailbox in a different case is not a mismatch', async () => {
+    // The contact is stored lower case and Calendly reports the invitee lower cased too, but a
+    // contact saved as Buyer@Example.com used to compare unequal and raise a false alert.
+    const before = await db.operationalAlert.count({ where: { tenantId: tenant.id, code: 'booking_invitee_mismatch' } });
+    const mixed = await db.contact.create({ data: { tenantId: tenant.id, leadId: lead.id, fullName: 'Mixed Case', email: 'Mixed.Case@Example.com', verification: 'VALID', lastVerifiedAt: new Date() } });
+    const mixedCampaign = await db.campaign.create({ data: { tenantId: tenant.id, name: 'Mixed', senderName: 'Sender', senderEmail: 'sender@example.com', calendlyUrl: 'https://calendly.com/test', status: 'ACTIVE', automationMode: 'FULLY_AUTOMATIC', sequenceSteps: { create: [{ stepOrder: 1, subject: 'Hi', body: 'Hi' }] } } });
+    await db.enrollment.create({ data: { tenantId: tenant.id, campaignId: mixedCampaign.id, contactId: mixed.id, score: 90, hasBuyer: true, hasPainSignal: true, evidence: { synthetic: true } } });
+    const mixedToken = attributionToken(tenant.id, mixedCampaign.id, mixed.id);
+    const res = await send(tenant.id, env('invitee.created', new Date(Date.now() - 20000).toISOString(), { uri: 'https://api.calendly.com/scheduled_events/E3/invitees/I3' }, mixedToken, 'mixed.case@example.com'));
+    assert.equal(res.status, 200);
+    assert.equal(await db.operationalAlert.count({ where: { tenantId: tenant.id, code: 'booking_invitee_mismatch' } }), before, 'a case-only difference must not raise an alert');
+    // The booking is still attributed and stored, and the stored-cased address is preserved.
+    const rows = await appointment();
+    assert.equal(rows.length, 3);
+    assert.equal(rows.at(-1).contactId, mixed.id, 'attribution follows the signed token, not the typed address');
+  });
+  await t.test('the address compared against comes from the verified token, not a raw split', async () => {
+    // utm_content is campaignId.contactId.signature. The handler used to take index 1 blindly,
+    // which on a malformed token disagrees with the verified parse and compares against the
+    // wrong contact. Such a booking must be ignored outright, never compared.
+    const decoy = await db.contact.create({ data: { tenantId: tenant.id, leadId: lead.id, fullName: 'Decoy', email: 'decoy@example.com', verification: 'VALID', lastVerifiedAt: new Date() } });
+    const forged = `${campaign.id}.${decoy.id}.not-a-valid-signature`;
+    const res = await send(tenant.id, env('invitee.created', new Date(Date.now() - 10000).toISOString(), { uri: 'https://api.calendly.com/scheduled_events/E4/invitees/I4' }, forged, 'someone-else@example.com'));
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).ignored, true, 'an unverifiable token is ignored');
+    assert.equal((await appointment()).length, 3, 'no appointment is created from an unverified token');
+    const alerts = await db.operationalAlert.count({ where: { tenantId: tenant.id, code: 'booking_invitee_mismatch' } });
+    assert.equal(alerts, 1, 'and no mismatch alert is raised against the decoy contact');
+    assert.ok(decoy.id);
+  });
 });
