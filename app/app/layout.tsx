@@ -23,7 +23,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
       <style>{`@media(max-width:760px){.userProfile{display:none!important}}`}</style>
       <a href="/app" className="brand" aria-label="LeadMelo home"><Logo /></a>
       <AppNav operator={user.role === 'SUPER_ADMIN'} />
-      <div className="sideActions" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '32px' }}>
+      <div className="sideActions" style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto' }}>
         <div className="userProfile" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 4px', marginBottom: '8px' }}>
           <div className="avatar" style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--accent)', color: 'var(--accent-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', flexShrink: 0, textTransform: 'uppercase', fontSize: '14px' }}>
             {((user.name || user.email) || '?').charAt(0)}
