@@ -81,9 +81,10 @@ services:
   # Optional Apollo/Hunter provider gateway. Start with: docker compose --profile gateway up -d
   # It deliberately receives NO database credentials, session secret or DATA_ENCRYPTION_KEY: only its own
   # config directory (tenant bindings and vendor keys, mode 600) and a small state volume.
-  # The config directory is mounted writable so vendor keys saved from Settings can be written back by
-  # PUT /credentials and survive a restart. Only this one file changes; read_only below still applies
-  # to the rest of the container filesystem.
+  # The config directory stays read-only: the gateway may read its bindings but never rewrites them.
+  # Vendor keys saved from Settings are pushed over PUT /credentials and held in memory; LeadMelo
+  # re-pushes on demand (on save, and again whenever the gateway answers 409 vendor_not_configured),
+  # so a gateway restart self-heals on the next discovery or verification run.
   gateway:
     image: leadmelo:${RELEASE_TAG:-20.0.0}
     build: .
@@ -100,7 +101,7 @@ services:
       GATEWAY_DUMMY_EMAILS: ${GATEWAY_DUMMY_EMAILS:-}
     ports: ["127.0.0.1:8788:8788"]
     volumes:
-      - ${GATEWAY_CONFIG_DIR:-./gateway-config}:/etc/leadmelo-gateway
+      - ${GATEWAY_CONFIG_DIR:-./gateway-config}:/etc/leadmelo-gateway:ro
       - gatewaydata:/var/lib/leadmelo-gateway
     networks: [backend]
     init: true

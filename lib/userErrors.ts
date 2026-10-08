@@ -54,7 +54,7 @@ const MESSAGES: Record<string, string> = {
   gateway_http_502: 'The discovery provider gateway is unreachable or returned a bad gateway response. Check gateway service status and retry.',
   gateway_http_503: 'The discovery provider gateway is temporarily busy or unavailable. The run will retry automatically.',
   gateway_http_500: 'The discovery provider gateway encountered an internal server error. Please retry or check gateway service logs.',
-  gateway_http_409: 'The provider gateway has no vendor key for this workspace. Save an Apollo and Hunter key under Provider credentials in Settings, then run the campaign again.',
+  gateway_http_409: 'The provider gateway has no vendor key for this workspace. Save an Apollo and Hunter key under Provider credentials in Settings; the gateway reads them from its own tenants.json, so run discovery again once they are saved.',
   gateway_credentials_unsupported: 'This gateway build has no credential endpoint, so keys saved in Settings cannot reach it. Upgrade the gateway, or add the keys to its tenants file by hand.',
   provider_credential_missing: 'That provider credential is not saved for this workspace yet. Enter it and choose Save credentials first.',
   vendor_auth: 'The provider rejected this API key. Check the key in the vendor’s dashboard and save it again.',

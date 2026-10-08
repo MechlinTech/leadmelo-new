@@ -24,8 +24,6 @@ export type ProviderStatus = {
   gatewayConfigured: boolean; apolloConfigured: boolean; hunterConfigured: boolean;
   /** Whether the gateway currently holds this tenant's vendor keys. Null when it cannot be reached. */
   gatewaySynced: boolean | null;
-  /** Whether the gateway could write them back to its tenants file for durability across restarts. */
-  gatewayPersisted: boolean | null;
 };
 
 /** Decrypted credentials. Server-side only: never return this from a route. */
@@ -58,7 +56,7 @@ function gatewayBase(): URL {
   return url;
 }
 
-export type GatewaySync = { ok: boolean; apollo: boolean; hunter: boolean; persisted: boolean };
+export type GatewaySync = { ok: boolean; apollo: boolean; hunter: boolean };
 
 /**
  * Call the gateway, pushing this tenant's vendor keys first if the gateway says it has none.
@@ -105,14 +103,14 @@ export async function pushCredentialsToGateway(tenantId: string, secrets?: Provi
   if (res.status === 401) throw new HttpError(409, 'gateway_http_401');
   if (!res.ok) throw new HttpError(502, `gateway_http_${res.status}`);
   const body = await res.json().catch(() => ({}));
-  return { ok: true, apollo: !!body.apollo, hunter: !!body.hunter, persisted: !!body.persisted };
+  return { ok: true, apollo: !!body.apollo, hunter: !!body.hunter };
 }
 
 /**
  * What the gateway currently holds for this tenant, for the Settings status line. Answers null when
  * the gateway is unreachable so the UI can say "unknown" instead of claiming a false failure.
  */
-export async function gatewayCredentialState(tenantId: string, secrets?: ProviderSecrets): Promise<{ apollo: boolean; hunter: boolean; persisted: boolean } | null> {
+export async function gatewayCredentialState(tenantId: string, secrets?: ProviderSecrets): Promise<{ apollo: boolean; hunter: boolean } | null> {
   const s = secrets ?? await loadProviderSecrets(tenantId);
   if (!s.gatewayKey) return null;
   try {
@@ -121,7 +119,7 @@ export async function gatewayCredentialState(tenantId: string, secrets?: Provide
     const res = await fetch(url, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Authorization: `Bearer ${s.gatewayKey}` } });
     if (!res.ok) return null;
     const body = await res.json().catch(() => ({}));
-    return { apollo: !!body.apollo, hunter: !!body.hunter, persisted: !!body.persisted };
+    return { apollo: !!body.apollo, hunter: !!body.hunter };
   } catch {
     return null;
   }

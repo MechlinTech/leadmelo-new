@@ -284,3 +284,67 @@ test('dummy discovery returns configured emails without calling Apollo and still
     assert.equal(v.count('api.apollo.io'), 0, 'Apollo is still never called in dummy mode');
   } finally { await g.stop(); }
 });
+
+// Vendor keys are configured from LeadMelo Settings and pushed here over the tenant's own bearer
+// token, which is already this gateway's notion of tenant identity. These tests pin the properties
+// that make that safe: a tenant can only write its own keys, an unauthenticated caller gets nothing,
+// a partial update leaves the other key alone, and no response ever echoes a key back.
+test('PUT /credentials: a tenant writes its own vendor keys using its bearer token', async t => {
+  const v = vendors(); const g = await start(v.fetcher);
+  const call = (method, token, body) => fetch(`${g.url}/credentials`, {
+    method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  try {
+    await t.test('an unauthenticated or unknown caller is refused', async () => {
+      assert.equal((await call('GET')).status, 401);
+      assert.equal((await call('GET', 'a'.repeat(40))).status, 401);
+      assert.equal((await call('PUT', 'a'.repeat(40), { apolloKey: 'apollo-key-123' })).status, 401);
+    });
+
+    await t.test('GET reports presence as booleans and never echoes a key', async () => {
+      const res = await call('GET', BEARER); const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.deepEqual(body, { tenantId: 't1', apollo: true, hunter: true });
+      assert.ok(!JSON.stringify(body).includes('apollo-key-123'), 'no key value in the response');
+    });
+
+    await t.test('a saved key is what discovery then actually uses', async () => {
+      // t3 starts with no keys, so discovery is refused until they are supplied.
+      await assert.rejects(discover(NO_APOLLO, 'cred-key-0001', request('t3', { limit: 1 })), /gateway_http_409/);
+      const before = v.count('api.apollo.io');
+      await call('PUT', NO_APOLLO, { apolloKey: 'apollo-key-789', hunterKey: 'hunter-key-789' });
+      const r = await discover(NO_APOLLO, 'cred-key-0002', request('t3', { limit: 1 }));
+      assert.equal(r.prospects.length, 1, 'discovery now runs instead of answering vendor_not_configured');
+      assert.ok(v.count('api.apollo.io') > before, 'Apollo was actually called with the saved key');
+    });
+
+    await t.test('a partial update leaves the untouched key in place', async () => {
+      await call('PUT', BEARER, { apolloKey: 'apollo-key-rotated' });
+      const body = await (await call('GET', BEARER)).json();
+      assert.equal(body.apollo, true); assert.equal(body.hunter, true, 'hunter was not cleared by an apollo-only update');
+    });
+
+    await t.test('an explicit null clears one key', async () => {
+      await call('PUT', BEARER, { hunterKey: null });
+      assert.deepEqual(await (await call('GET', BEARER)).json(), { tenantId: 't1', apollo: true, hunter: false });
+    });
+
+    await t.test('one tenant cannot touch another tenant\'s keys', async () => {
+      await call('PUT', BEARER, { apolloKey: 'apollo-key-for-t1' });
+      await call('PUT', 'c'.repeat(40), { apolloKey: 'apollo-key-attempt' }).catch(() => undefined);
+      assert.equal((await (await call('GET', BEARER)).json()).apollo, true);
+    });
+
+    await t.test('a malformed body is rejected', async () => {
+      assert.equal((await call('PUT', BEARER, { apolloKey: 'short' })).status, 400);
+      assert.equal((await call('PUT', BEARER, { unknown: 'x' })).status, 400);
+    });
+
+    await t.test('persistence is reported honestly when the config file is read-only', async () => {
+      const body = await (await call('PUT', BEARER, { apolloKey: 'apollo-key-1234' })).json();
+      // The harness sets no tenantsFile, so the gateway must say it only holds these in memory.
+      assert.equal(body.persisted, false);
+      assert.equal(body.ok, true);
+    });
+  } finally { await g.stop(); }
+});

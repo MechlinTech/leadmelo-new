@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 
 // GATEWAY_TENANTS_FILE: JSON array binding each LeadMelo tenant's bearer credential (stored only as
@@ -19,9 +19,6 @@ export type GatewayConfig = {
   // Dev/test only: when true, POST /discover returns synthetic prospects from GATEWAY_DUMMY_EMAILS and never calls Apollo.
   dummyDiscovery: boolean;
   dummyEmails: string[];
-  // Where PUT /credentials writes the updated bindings back, so keys survive a restart. Absent or
-  // read-only means the update is held in memory only and the caller is told so.
-  tenantsFile?: string;
 };
 const lowerKeys = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v]));
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -56,33 +53,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig 
     discoveryDeadlineMs: num(env.GATEWAY_DISCOVERY_DEADLINE_MS, 90000, 5000, 600000),
     maxEnrichPerRequest: num(env.GATEWAY_MAX_ENRICH_PER_REQUEST, 60, 1, 500), maxPages: num(env.GATEWAY_MAX_PAGES, 3, 1, 10),
     storeFile: env.GATEWAY_STORE_FILE,
-    tenantsFile: env.GATEWAY_TENANTS_FILE,
     dummyDiscovery, dummyEmails
   };
-}
-
-/**
- * Write the current bindings back to the tenants file so credentials set through the API survive a
- * restart. Keeps mode 600 because the file holds vendor keys in plaintext. Returns false instead of
- * throwing when the file is read-only: the in-memory update has already been applied and LeadMelo
- * re-pushes on demand, so failing the request would be misleading.
- */
-export function persistTenants(config: GatewayConfig): boolean {
-  const file = config.tenantsFile;
-  if (!file) return false;
-  try {
-    const rows = [...config.tenants.entries()].map(([bearerSha256, b]) => {
-      const row: Record<string, string> = { bearerSha256, tenantId: b.tenantId };
-      if (b.apolloKey) row.apolloKey = b.apolloKey;
-      if (b.hunterKey) row.hunterKey = b.hunterKey;
-      return row;
-    });
-    // Write-then-rename so a crash mid-write cannot leave a truncated, unparseable config.
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(rows, null, 2), { mode: 0o600 });
-    renameSync(tmp, file);
-    return true;
-  } catch {
-    return false;
-  }
 }

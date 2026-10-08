@@ -7,7 +7,7 @@ import { discover } from './discover';
 import { discoverDummy } from './dummyDiscover';
 import { GatewayHttpError, VendorError } from './errors';
 import { GatewayStore } from './store';
-import { persistTenants, type GatewayConfig, type TenantBinding } from './config';
+import type { GatewayConfig, TenantBinding } from './config';
 
 const list = z.array(z.string().max(200)).max(100).default([]);
 const icpSchema = z.object({ industries: list, companySizes: list, geographies: list, technologies: list, buyingSignals: list, buyerTitles: list, exclusionRules: list }).passthrough();
@@ -47,20 +47,25 @@ export function createGatewayServer(config: GatewayConfig, deps: { fetcher?: typ
     // Vendor credentials, managed from LeadMelo Settings. The bearer token is already this tenant's
     // identity here, so it authenticates the write too: a tenant can only ever replace its own keys,
     // and no new shared secret or database credential is introduced. Responses carry booleans only.
+    //
+    // The config directory stays read-only and this endpoint never writes to it: the gateway holds
+    // keys in memory only. LeadMelo re-pushes on save and again whenever discovery or verification
+    // is refused for a missing key, so a restart costs one extra request and nothing else. That is
+    // deliberately better than letting the gateway rewrite a file that holds vendor keys in
+    // plaintext, which is the operator's to manage at mode 600.
     if (path === '/credentials') {
       if (!binding) throw new GatewayHttpError(401, 'unauthorized');
       if (req.method === 'GET') {
         log('credentials_read', { tenant: binding.tenantId });
-        return send(res, 200, { tenantId: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey });
+        return send(res, 200, { tenantId: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey, inMemory: true });
       }
       if (req.method !== 'PUT') throw new GatewayHttpError(404, 'not_found');
       const body = credentialReq.parse(await readJson(req));
       // An omitted field leaves the stored key alone; an explicit null clears it.
       if (body.apolloKey !== undefined) binding.apolloKey = body.apolloKey ?? undefined;
       if (body.hunterKey !== undefined) binding.hunterKey = body.hunterKey ?? undefined;
-      const persisted = persistTenants(config);
-      log('credentials_updated', { tenant: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey, persisted });
-      return send(res, 200, { ok: true, tenantId: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey, persisted });
+      log('credentials_updated', { tenant: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey });
+      return send(res, 200, { ok: true, tenantId: binding.tenantId, apollo: !!binding.apolloKey, hunter: !!binding.hunterKey, inMemory: true });
     }
 
     if (req.method !== 'POST' || !['/discover', '/verify', '/send'].includes(path)) throw new GatewayHttpError(404, 'not_found');
