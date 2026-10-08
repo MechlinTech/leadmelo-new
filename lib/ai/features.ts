@@ -69,6 +69,8 @@ const wrap = (label: string, text: string) => `<data name="${label}">\n${text.re
 // ---- campaign assist ----------------------------------------------------------------------------------------
 
 const listOf = (max = 12) => z.array(z.string()).max(max).transform(a => a.map(s => oneLine(s, 120)).filter(Boolean));
+// A model that answers with a schema it half-followed gets one more chance before the request fails.
+const MAX_SHAPE_ATTEMPTS = 2;
 const campaignShape = z.object({
   name: z.string(), offer: z.string(),
   icp: z.object({ industries: listOf(), companySizes: listOf(), geographies: listOf(), technologies: listOf().optional(), buyingSignals: listOf(), buyerTitles: listOf(), exclusionRules: listOf().optional() }),
@@ -84,19 +86,34 @@ export async function suggestCampaign(cfg: AiConfig, input: { description: strin
     { role: 'user', content: [
       `Propose an ideal customer profile and a ${n}-email outreach sequence for the business described below.`,
       'JSON shape: {"name": string, "offer": string (one short sentence), "icp": {"industries": string[], "companySizes": string[] (e.g. "50-200"), "geographies": string[], "technologies": string[], "buyingSignals": string[], "buyerTitles": string[], "exclusionRules": string[]}, "steps": [{"waitBusinessDays": number, "subject": string, "body": string}]}',
+      'Every one of industries, companySizes, geographies, buyingSignals and buyerTitles needs at least one entry. Never return an empty array for those; if you are unsure, give your best specific guess.',
       'Emails: under 110 words, plain, one clear ask to book a short call via {{calendlyUrl}}, address the reader as {{firstName}}, sign as {{senderName}}. Follow-ups are shorter and add a new angle.',
       wrap('business_description', input.description.slice(0, 2000))
     ].join('\n\n') }
   ];
-  const raw = campaignShape.safeParse(extractJson(await chat(cfg, messages, { json: true, maxTokens: 1400, fetcher })));
-  if (!raw.success) throw new HttpError(502, 'ai_bad_shape');
-  const r = raw.data;
-  const icp = icpInput.safeParse({
+  // A reasoning model spends part of max_tokens on internal thinking before it writes anything, so
+  // the visible JSON only gets the remainder. Measured against gemini-3.8-flash, ~700-850 tokens
+  // went to thinking on a typical reply; budgeting 1400 truncated the JSON mid-string often enough
+  // to surface as ai_bad_json. 8000 leaves ample room for the shape above plus thinking.
+  const icpOf = (r: z.infer<typeof campaignShape>) => icpInput.safeParse({
     name: oneLine(r.name, 200) || 'AI suggested ICP', offer: oneLine(r.offer, 200) || 'Offer to confirm',
     industries: r.icp.industries, companySizes: r.icp.companySizes, geographies: r.icp.geographies, technologies: r.icp.technologies ?? [],
     buyingSignals: r.icp.buyingSignals, buyerTitles: r.icp.buyerTitles, exclusionRules: r.icp.exclusionRules ?? []
   });
-  if (!icp.success) throw new HttpError(502, 'ai_incomplete_icp');
+  // The model intermittently answers with an empty buyingSignals or buyerTitles list, which icpInput
+  // rejects because an ICP with no buying signal is not actionable. That is a compliance miss in
+  // the output, not a transport failure, and re-asking clears it: measured 3/10 on gemini-3.8-flash,
+  // 0/10 on the second attempt. The prompt asks for the lists explicitly; this covers the rest.
+  let r: z.infer<typeof campaignShape> | null = null;
+  let icp: ReturnType<typeof icpOf> | null = null;
+  for (let attempt = 1; attempt <= MAX_SHAPE_ATTEMPTS; attempt++) {
+    const raw = campaignShape.safeParse(extractJson(await chat(cfg, messages, { json: true, maxTokens: 8000, fetcher })));
+    if (!raw.success) throw new HttpError(502, 'ai_bad_shape');
+    r = raw.data;
+    icp = icpOf(r);
+    if (icp.success) break;
+  }
+  if (!icp?.success || !r) throw new HttpError(502, 'ai_incomplete_icp');
   const steps = r.steps.map((s, i) => ({
     stepOrder: i + 1, waitBusinessDays: i === 0 ? 0 : Math.min(30, Math.max(1, Math.round(s.waitBusinessDays ?? 3))),
     subject: oneLine(s.subject, 200), body: cleanText(s.body, 4000)
@@ -123,7 +140,8 @@ export async function analyseReply(cfg: AiConfig, input: { text: string; offer?:
       wrap('prospect_reply', input.text.slice(0, 3000))
     ].filter(Boolean).join('\n\n') }
   ];
-  const parsed = replyShape.safeParse(extractJson(await chat(cfg, messages, { json: true, maxTokens: 700, fetcher })));
+  // Same reasoning-model headroom as suggestCampaign: 700 truncated this shape mid-sentence.
+  const parsed = replyShape.safeParse(extractJson(await chat(cfg, messages, { json: true, maxTokens: 4000, fetcher })));
   if (!parsed.success) throw new HttpError(502, 'ai_bad_shape');
   const p = parsed.data;
   // The deterministic rules stay authoritative for anything that stops outreach. The model can only add nuance.

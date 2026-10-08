@@ -31,15 +31,27 @@ export function checkAiUrl(raw: string, env: NodeJS.ProcessEnv = process.env): s
   return null;
 }
 
-// OpenAI rejects a short or non-sk key with 401, and a model field that holds an email never names a model.
+// Providers that reject a short or wrongly-prefixed key outright, so a bad key costs no round trip.
+// Each entry pairs a host with a test for that provider's key format. A model field that holds an
+// email never names a model, so that is checked for every provider.
+const KEY_FORMATS: Array<{ hosts: string[]; invalid: string; ok: (key: string) => boolean }> = [
+  // Gemini returns HTTP 400 "Please pass a valid API key" for a wrong key, not 401, and Google AI
+  // Studio keys are "AIza" followed by 35 more characters.
+  { hosts: ['generativelanguage.googleapis.com'], invalid: 'ai_google_key_invalid', ok: k => k.startsWith('AIza') && k.length >= 35 },
+  { hosts: ['api.openai.com'], invalid: 'ai_openai_key_invalid', ok: k => k.startsWith('sk-') && k.length >= 40 }
+];
+
 export function explainAiSetup(baseUrl: string, model: string, apiKey?: string): string | null {
   if (model.includes('@')) return 'ai_model_is_email';
   let host = '';
   try { host = new URL(baseUrl).hostname.toLowerCase(); } catch { return null; }
-  if (host !== 'api.openai.com') return null;
+  const provider = KEY_FORMATS.find(p => p.hosts.includes(host));
+  // An unrecognised host (a local Ollama, a proxy) is left to the provider, which is the only
+  // authority on its own key format.
+  if (!provider) return null;
   const key = apiKey?.trim() ?? '';
   if (!key) return 'ai_key_required';
-  if (!key.startsWith('sk-') || key.length < 40) return 'ai_openai_key_invalid';
+  if (!provider.ok(key)) return provider.invalid;
   return null;
 }
 
@@ -98,14 +110,19 @@ export async function chat(cfg: AiConfig, messages: ChatMessage[], opts: { json?
         for (;;) { const { value, done } = await reader.read(); if (done) break; size += value.length; if (size > MAX_RESPONSE_BYTES) { await reader.cancel(); throw new HttpError(502, 'ai_response_too_large'); } parts.push(value); }
         let payload: any;
         try { payload = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { throw new HttpError(502, 'ai_invalid_response'); }
-        const text = payload?.choices?.[0]?.message?.content;
-        if (typeof text !== 'string' || !text.trim()) {
-          // A reasoning model can answer 200 with no text at all when max_tokens is spent on
-          // internal thinking (finish_reason "length", completion_tokens 0). That is a token
-          // budget problem, not a connection failure, and saying so saves a wild goose chase.
-          if (payload?.choices?.[0]?.finish_reason === 'length') throw new HttpError(502, 'ai_output_budget_exhausted');
-          throw new HttpError(502, 'ai_empty_response');
-        }
+        // A reasoning model (Gemini "thinking", o-series) can answer 200 with finish_reason
+        // "length" and a body that is present but cut off mid-sentence, because max_tokens was
+        // spent on internal reasoning before the visible text began. That is a token budget
+        // problem, not a connection failure, and saying so saves a wild goose chase.
+        //
+        // finish_reason must be read BEFORE the emptiness test. A truncated body is non-empty, so
+        // checking emptiness first returns the fragment at line 109 and the length signal is
+        // lost: extractJson then fails to find a balanced "}" and the real cause is reported as
+        // ai_bad_json. Empty-and-spent stays ai_output_budget_exhausted either way.
+        const choice = payload?.choices?.[0];
+        if (choice?.finish_reason === 'length') throw new HttpError(502, 'ai_output_budget_exhausted');
+        const text = choice?.message?.content;
+        if (typeof text !== 'string' || !text.trim()) throw new HttpError(502, 'ai_empty_response');
         return text;
       } catch (e) {
         if (e instanceof HttpError) throw e;
