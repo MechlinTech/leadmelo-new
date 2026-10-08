@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { db } from './db';
 import { gateway, discoveredSchema, sentSchema } from './providers';
+import { gatewayWithCredentialSync } from './providerCredentials';
 import { qualifyProspect, withinSendWindow, addBusinessDays, outreachWaitReason, followUpDueAt, qaFollowUpDelayMinutes } from './policy';
 import { unsubscribeToken } from './unsubscribe';
 import { renderOutreachContent } from './outreachContent';
@@ -73,7 +74,7 @@ export async function processRun(now = new Date()) {
       const key = `${c.tenantId}:${spend.reason}:${now.toISOString().slice(0, 7)}`;
       await db.operationalAlert.upsert({ where: { key }, update: {}, create: { tenantId: c.tenantId, key, code: spend.reason, entityId: c.id } });
     }
-    const result = allowed ? await gateway(s.gatewayKey, 'discover', run.idempotencyKey, { tenantId: c.tenantId, campaignId: c.id, icp: c.icp, limit: allowed }, discoveredSchema) : { prospects: [] };
+    const result = allowed ? await gatewayWithCredentialSync(c.tenantId, s.gatewayKey, 'discover', run.idempotencyKey, { tenantId: c.tenantId, campaignId: c.id, icp: c.icp, limit: allowed }, discoveredSchema) : { prospects: [] };
     if (result.prospects.length > allowed) throw new Error('provider_exceeded_limit');
     let enrolled = 0;
     for (const p of result.prospects) {
