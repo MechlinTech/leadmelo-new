@@ -104,6 +104,25 @@ test('gateway bearer probe: the meaningful check is an authenticated request', a
   });
 });
 
+test('the gateway URL is built without a doubled slash', async t => {
+  // Assigning url.pathname = '' does not stick: the URL parser normalises it back to '/', so a later
+  // append produced '//credentials'. The gateway answered 404 and the UI reported "this gateway build
+  // has no credential endpoint", which is a version problem that does not exist.
+  await t.test('a root gateway URL yields exactly one slash before the path', async () => {
+    process.env.PROVIDER_GATEWAY_URL = 'http://gateway:8788';
+    let seen;
+    await probeGateway({ gatewayKey: 'x'.repeat(40) }, async (url) => { seen = String(url); return json(200, { apollo: true, hunter: true, inMemory: true }); });
+    assert.equal(seen, 'http://gateway:8788/credentials');
+    assert.ok(!seen.includes('//credentials'), 'a doubled slash makes the gateway answer 404');
+  });
+  await t.test('a gateway URL with a base path keeps it and still adds one slash', async () => {
+    process.env.PROVIDER_GATEWAY_URL = 'https://gateway.example.com/leadmelo/';
+    let seen;
+    await probeGateway({ gatewayKey: 'x'.repeat(40) }, async (url) => { seen = String(url); return json(200, { apollo: true, hunter: true, inMemory: true }); });
+    assert.equal(seen, 'https://gateway.example.com/leadmelo/credentials');
+  });
+});
+
 test('the status shape the UI receives carries no secret', () => {
   const flags = configuredFlags({ gatewayKey: 'super-secret-token', apolloKey: 'AIza-secret', hunterKey: 'hunter-secret' });
   assert.deepEqual(flags, { gatewayConfigured: true, apolloConfigured: true, hunterConfigured: true });
