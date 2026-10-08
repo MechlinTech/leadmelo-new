@@ -11,7 +11,7 @@ export const PALETTES: Record<Exclude<ThemeId, 'system'>, Palette> = {
   sunset: { bg: '#fff6ee', surface: '#ffffff', surface2: '#fde8d6', text: '#2c1a11', muted: '#6b4b3b', line: '#efcdb4', accent: '#b8410a', accentText: '#ffffff', accentSoft: '#fde0cc', link: '#a33a08', danger: '#8c211e', dangerBg: '#fff1f0', focus: '#0b5fa5', scheme: 'light' }
 };
 export const THEME_IDS: ThemeId[] = ['system', 'light', 'dark', 'ocean', 'forest', 'sunset'];
-export const THEME_LABELS: Record<ThemeId, string> = { system: 'System (follows your device)', light: 'Light', dark: 'Dark', ocean: 'Ocean', forest: 'Forest', sunset: 'Sunset' };
+export const THEME_LABELS: Record<ThemeId, string> = { system: 'System', light: 'Light', dark: 'Dark', ocean: 'Ocean', forest: 'Forest', sunset: 'Sunset' };
 export const THEME_COOKIE = 'lm_theme';
 export const isThemeId = (v: unknown): v is ThemeId => typeof v === 'string' && (THEME_IDS as string[]).includes(v);
 

@@ -244,12 +244,27 @@ test('Microsoft 365 and autonomous recovery database flows',async t=>{
     assert.ok(draft, 'worker submitted a draft to mocked Graph');
     const rawMime = Buffer.from(draft.body, 'base64').toString('utf8');
     const divider = rawMime.indexOf('\r\n\r\n');
-    const headers = rawMime.slice(0, divider), encodedBody = rawMime.slice(divider + 4).replace(/\r\n/g, '');
-    const providerBody = Buffer.from(encodedBody, 'base64').toString('utf8');
+    const headers = rawMime.slice(0, divider), rest = rawMime.slice(divider + 4);
+    const boundary = /boundary="([^"]+)"/.exec(headers)?.[1];
+    assert.ok(boundary, 'the draft offers both alternatives');
+    const parts = {};
+    for (const chunk of rest.split(`--${boundary}`)) {
+     const trimmed = chunk.trim();
+     if (!trimmed || trimmed === '--') continue;
+     const at = trimmed.indexOf('\r\n\r\n');
+     const type = /^Content-Type: ([^;]+)/m.exec(trimmed.slice(0, at))?.[1]?.trim();
+     parts[type] = Buffer.from(trimmed.slice(at + 4).replace(/\s+/g, ''), 'base64').toString('utf8');
+    }
     const encodedSubject = headers.match(/^Subject: =\?UTF-8\?B\?(.+)\?=$/m)?.[1];
     assert.equal(Buffer.from(encodedSubject, 'base64').toString('utf8'), review.reviewSubject);
-    assert.equal(providerBody, review.reviewBody, 'Graph MIME body equals the approved review snapshot byte-for-byte');
-    assert.equal(headers.match(/^Content-Type: ([^;]+)/m)?.[1], label === 'html' ? 'text/html' : 'text/plain');
+    // The alternative a reader displays for this copy must equal the approved snapshot exactly.
+    const shown = label === 'html' ? parts['text/html'] : parts['text/plain'];
+    assert.equal(shown, review.reviewBody, 'Graph MIME body equals the approved review snapshot byte-for-byte');
+    for (const [type, content] of Object.entries(parts)) {
+     assert.ok(content.trim().length > 0, `the ${type} alternative is never blank`);
+     // The first name is personalised to its first token, and the company may appear escaped.
+     assert.match(content, /Review (?:&amp;|&) Co/, `the ${type} alternative carries the personalised copy`);
+    }
     assert.equal(draft.contentType, 'text/plain', 'Graph MIME request uses the documented HTTP media type');
     return review;
    };

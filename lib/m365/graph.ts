@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { decrypt } from '../crypto';
 
@@ -88,15 +89,48 @@ export function hasVisibleText(body: string | null | undefined): boolean {
   const INVISIBLE = /[\s\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u{E0001}-\u{E007F}\u{FE00}-\u{FE0F}\u{1F3FB}-\u{1F3FF}]/u;
   return [...decoded].some(ch => ch.trim() !== '' && !INVISIBLE.test(ch));
 }
+const escapeHtmlText = (text: string) => text
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// Enough HTML for a reader that will not render plain text, without altering the copy.
+function textToHtmlBody(text: string) {
+  const blocks = text.split(/\n{2,}/).map(block => `<p>${escapeHtmlText(block).replace(/\n/g, '<br>')}</p>`).join('');
+  return `<html><body>${blocks}</body></html>`;
+}
+// Enough plain text for a reader that will not render HTML.
+function htmlToTextBody(html: string) {
+  return html
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 export function mimeMessage(input: MailInput, key: string) {
   mailInput.parse(input);
   for (const text of [input.from, input.to, input.subject, input.fromName, key, ...Object.values(input.headers)]) if (/[\r\n]/.test(text)) throw new Error('mail_header_injection');
   const subject = `=?UTF-8?B?${Buffer.from(input.subject).toString('base64')}?=`;
-  const content = Buffer.from(input.body).toString('base64').match(/.{1,76}/g)?.join('\r\n') ?? '';
-  const contentType = emailBodyContentType(input.body) === 'HTML' ? 'text/html' : 'text/plain';
+  // Ship both a plain-text and an HTML alternative on every message. A single-part
+  // text/plain email is shown as a blank page by some webmail readers, so the body then
+  // looks lost even though it was accepted and stored intact. multipart/alternative gives
+  // every reader a representation it can display.
+  const isHtml = emailBodyContentType(input.body) === 'HTML';
+  const plain = isHtml ? htmlToTextBody(input.body) : input.body;
+  const html = isHtml ? input.body : textToHtmlBody(input.body);
+  // Deterministic, and derived only from values already checked for header injection.
+  const boundary = `----=_LeadMelo_${createHash('sha256').update(`${input.to}\0${input.subject}\0${key}`).digest('hex').slice(0, 40)}`;
+  const encode64 = (text: string) => Buffer.from(text).toString('base64').match(/.{1,76}/g)?.join('\r\n') ?? '';
+  const part = (type: 'text/plain' | 'text/html', text: string) =>
+    `--${boundary}\r\nContent-Type: ${type}; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${encode64(text)}\r\n`;
   return Buffer.from([
     `From: ${input.from}`, `To: ${input.to}`, `Subject: ${subject}`, 'MIME-Version: 1.0',
-    `Content-Type: ${contentType}; charset=UTF-8`, 'Content-Transfer-Encoding: base64',
-    `X-LeadMelo-Key: ${key}`, ...Object.entries(input.headers).map(([k,v])=>`${k}: ${v}`), '', content
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    `X-LeadMelo-Key: ${key}`, ...Object.entries(input.headers).map(([k, v]) => `${k}: ${v}`), '',
+    part('text/plain', plain),
+    part('text/html', html),
+    `--${boundary}--`
   ].join('\r\n')).toString('base64');
 }

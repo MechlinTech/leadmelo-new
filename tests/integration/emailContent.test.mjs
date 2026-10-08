@@ -44,16 +44,33 @@ function readDeliveredMessage(base64) {
     const at = line.indexOf(':');
     if (at > 0) headers[line.slice(0, at).trim().toLowerCase()] = line.slice(at + 1).trim();
   }
-  const encoding = (headers['content-transfer-encoding'] ?? '7bit').toLowerCase();
-  const body = encoding === 'base64' ? Buffer.from(rawBody.replace(/\s+/g, ''), 'base64').toString('utf8') : rawBody;
   const encodedSubject = headers.subject?.match(/^=\?UTF-8\?B\?(.+)\?=$/);
-  return {
-    to: headers.to,
-    subject: encodedSubject ? Buffer.from(encodedSubject[1], 'base64').toString('utf8') : headers.subject,
-    contentType: headers['content-type'],
-    body
-  };
+  const subject = encodedSubject ? Buffer.from(encodedSubject[1], 'base64').toString('utf8') : headers.subject;
+  // Messages are multipart/alternative: collect every part so a reader that cannot
+  // render one representation still has the other.
+  const boundary = /boundary="([^"]+)"/.exec(headers['content-type'] ?? '')?.[1];
+  const parts = {};
+  if (boundary) {
+    for (const chunk of rawBody.split(`--${boundary}`)) {
+      const trimmed = chunk.trim();
+      if (!trimmed || trimmed === '--') continue;
+      const at = trimmed.indexOf('\n\n');
+      const type = /^Content-Type: ([^;]+)/im.exec(trimmed.slice(0, at))?.[1]?.trim().toLowerCase();
+      const encoding = (/^Content-Transfer-Encoding: (.+)$/im.exec(trimmed.slice(0, at))?.[1] ?? '7bit').trim().toLowerCase();
+      const payload = trimmed.slice(at + 2);
+      parts[type] = encoding === 'base64' ? Buffer.from(payload.replace(/\s+/g, ''), 'base64').toString('utf8') : payload;
+    }
+  } else {
+    const encoding = (headers['content-transfer-encoding'] ?? '7bit').toLowerCase();
+    parts[headers['content-type']?.split(';')[0].trim().toLowerCase()] = encoding === 'base64'
+      ? Buffer.from(rawBody.replace(/\s+/g, ''), 'base64').toString('utf8') : rawBody;
+  }
+  return { to: headers.to, subject, contentType: headers['content-type'], ...parts };
 }
+
+// The alternative a reader shows for this kind of copy: HTML copy renders as HTML,
+// plain copy renders as text.
+const rendered = (message, kind) => message[kind === 'html' ? 'text/html' : 'text/plain'];
 
 const COPY = {
   subject: 'Quick QA question for {{firstName}}',
@@ -143,20 +160,29 @@ test('the recipient gets the complete approved content, for the initial email an
       assert.equal(sent.status, 'SENT', `${kind}: initial email sent; error=${sent.error ?? 'none'}`);
 
       const delivered = readDeliveredMessage(drafts.at(-1));
+      const shown = rendered(delivered, kind);
+      assert.match(delivered.contentType, /^multipart\/alternative/, `${kind}: both alternatives are offered`);
+      assert.ok(delivered['text/plain']?.trim(), `${kind}: a plain-text alternative is always present`);
+      assert.ok(delivered['text/html']?.trim(), `${kind}: an HTML alternative is always present`);
       assert.equal(delivered.to, context.contact.email, `${kind}: delivered to the enrolled contact`);
       assert.equal(delivered.subject, 'Quick QA question for Pat', `${kind}: subject is the approved subject`);
-      assert.equal(delivered.body, preview.body, `${kind}: the delivered body is the approved body, byte for byte`);
-      assert.equal(delivered.body, sent.body, `${kind}: the delivered body is what was persisted`);
-      assert.ok(delivered.body.trim().length > 40, `${kind}: the delivered body is not empty`);
-      assert.match(delivered.body, /Hi Pat,/, `${kind}: first name is personalised`);
-      assert.match(delivered.body, /Acme Robotics/, `${kind}: company is personalised`);
-      assert.match(delivered.body, /https:\/\/calendly\.com\/sam\/30min\?utm_source=leadmelo(?:&|&amp;)utm_content=/, `${kind}: the scheduling link carries signed attribution`);
-      assert.match(delivered.body, /Sam Seller/, `${kind}: sender name is present`);
-      assert.match(delivered.body, /221B Test Street/, `${kind}: postal address is present`);
-      assert.match(delivered.body, kind === 'html'
+      assert.equal(shown, preview.body, `${kind}: the delivered body is the approved body, byte for byte`);
+      assert.equal(shown, sent.body, `${kind}: the delivered body is what was persisted`);
+      assert.ok(shown.trim().length > 40, `${kind}: the delivered body is not empty`);
+      assert.match(shown, /Hi Pat,/, `${kind}: first name is personalised`);
+      assert.match(shown, /Acme Robotics/, `${kind}: company is personalised`);
+      assert.match(shown, /https:\/\/calendly\.com\/sam\/30min\?utm_source=leadmelo(?:&|&amp;)utm_content=/, `${kind}: the scheduling link carries signed attribution`);
+      assert.match(shown, /Sam Seller/, `${kind}: sender name is present`);
+      assert.match(shown, /221B Test Street/, `${kind}: postal address is present`);
+      assert.match(shown, kind === 'html'
         ? /<a href="https:\/\/leadmelo\.example\.com\/unsubscribe\?[^"]+">Unsubscribe<\/a>/
         : /Unsubscribe: https:\/\/leadmelo\.example\.com\/unsubscribe\?/, `${kind}: unsubscribe link is present`);
-      assert.match(delivered.contentType, kind === 'html' ? /^text\/html/ : /^text\/plain/, `${kind}: correct content type`);
+      // Whichever alternative the recipient's reader cannot display, the other one still
+      // carries the full copy, so the body can never look blank.
+      for (const alternative of [delivered['text/plain'], delivered['text/html']]) {
+        assert.match(alternative, /Hi Pat,/, `${kind}: each alternative carries the personalised greeting`);
+        assert.match(alternative, /221B Test Street/, `${kind}: each alternative carries the postal address`);
+      }
     }
   });
 
@@ -182,14 +208,16 @@ test('the recipient gets the complete approved content, for the initial email an
     const sent = await db.outreachEvent.findUniqueOrThrow({ where: { id: followUp.id } });
     assert.equal(sent.status, 'SENT', `follow-up sent; error=${sent.error ?? 'none'}`);
     const delivered = readDeliveredMessage(drafts.at(-1));
+    const shown = rendered(delivered, 'text');
     assert.equal(delivered.subject, 'Following up, Pat', 'the follow-up carries its own approved subject');
-    assert.equal(delivered.body, preview.body, 'the delivered follow-up body is the approved body, byte for byte');
-    assert.match(delivered.body, /^Still relevant, Pat\?/, 'the follow-up body is personalised');
-    assert.match(delivered.body, /utm_content=/, 'the follow-up link carries signed attribution');
-    assert.ok(delivered.body.trim().length > 40, 'the follow-up body is not empty');
+    assert.equal(shown, preview.body, 'the delivered follow-up body is the approved body, byte for byte');
+    assert.match(shown, /^Still relevant, Pat\?/, 'the follow-up body is personalised');
+    assert.match(shown, /utm_content=/, 'the follow-up link carries signed attribution');
+    assert.ok(shown.trim().length > 40, 'the follow-up body is not empty');
+    assert.ok(delivered['text/html']?.includes('Still relevant, Pat'), 'the HTML alternative also carries the follow-up copy');
     // The follow-up is a distinct message, not a resend of the first.
     assert.equal(drafts.length, 2, 'exactly one draft per approved message');
-    assert.notEqual(readDeliveredMessage(drafts[0]).body, delivered.body, 'the follow-up is not a copy of the initial email');
+    assert.notEqual(rendered(readDeliveredMessage(drafts[0]), 'text'), shown, 'the follow-up is not a copy of the initial email');
   });
 
   await t.test('an empty, whitespace-only or markup-only body is refused before any provider request', async () => {
@@ -250,8 +278,9 @@ test('the recipient gets the complete approved content, for the initial email an
     assert.equal(retried.status, 'SENT', `the retry delivers; error=${retried.error ?? 'none'}`);
     assert.equal(drafts.length, 1, 'exactly one draft was ever created');
     const delivered = readDeliveredMessage(drafts[0]);
-    assert.equal(delivered.body, retried.body, 'the retried message carries the complete body');
-    assert.match(delivered.body, /Hi Pat,/, 'personalisation survived the retry');
+    const shown = rendered(delivered, 'text');
+    assert.equal(shown, retried.body, 'the retried message carries the complete body');
+    assert.match(shown, /Hi Pat,/, 'personalisation survived the retry');
   });
 
   await t.test('a message already marked SENT is never sent again, however often it becomes due', async () => {

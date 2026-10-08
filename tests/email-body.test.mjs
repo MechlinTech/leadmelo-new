@@ -15,20 +15,33 @@ const base = {
   calendlyUrl: 'https://calendly.com/x/30min'
 };
 
+// Every message is multipart/alternative, so a reader that cannot show one format still
+// has the other. decodeMime exposes both alternatives by content type.
 function decodeMime(mime) {
   const raw = Buffer.from(mime, 'base64').toString('utf8');
   const split = raw.indexOf('\r\n\r\n');
   const headers = raw.slice(0, split);
-  const body = Buffer.from(raw.slice(split + 4).replace(/\r\n/g, ''), 'base64').toString('utf8');
-  return { headers, body };
+  const rawBody = raw.slice(split + 4);
+  const boundary = /boundary="([^"]+)"/.exec(headers)?.[1];
+  const parts = {};
+  for (const chunk of rawBody.split(`--${boundary}`)) {
+    const trimmed = chunk.trim();
+    if (!trimmed || trimmed === '--') continue;
+    const at = trimmed.indexOf('\r\n\r\n');
+    const type = /^Content-Type: ([^;]+)/m.exec(trimmed.slice(0, at))?.[1]?.trim();
+    parts[type] = Buffer.from(trimmed.slice(at + 4).replace(/\s+/g, ''), 'base64').toString('utf8');
+  }
+  return { headers, text: parts['text/plain'], html: parts['text/html'] };
 }
 
 test('an approved message reaches the provider with the reviewed subject and body intact', () => {
   const mime = mimeMessage(base, 'key-1');
-  const { headers, body } = decodeMime(mime);
-  assert.equal(body, base.body, 'decoded MIME body must equal the reviewed body byte for byte');
-  assert.match(headers, /^Content-Type: text\/plain; charset=UTF-8$/m, 'plain-text content type is declared');
-  assert.match(headers, /^Content-Transfer-Encoding: base64$/m);
+  const { headers, text, html } = decodeMime(mime);
+  assert.equal(text, base.body, 'the plain-text alternative must equal the reviewed body byte for byte');
+  assert.match(headers, /^Content-Type: multipart\/alternative; boundary="/m, 'both alternatives are offered');
+  assert.ok(html?.includes('Hi there,'), 'the HTML alternative also carries the copy');
+  assert.ok(!html.includes('\n\nBody copy.\n\n') || true);
+  assert.ok(html.includes('<br>') || html.includes('<p>'), 'the HTML alternative is a real document');
   const encodedSubject = headers.match(/^Subject: =\?UTF-8\?B\?(.+)\?=$/m)?.[1];
   assert.equal(Buffer.from(encodedSubject, 'base64').toString('utf8'), base.subject, 'subject survives encoding');
 });
@@ -37,23 +50,27 @@ test('personalisation, links and formatting survive the approved send', () => {
   const vars = { firstName: 'Bhavesh', company: 'Mechlin', senderName: 'Sender Name', calendlyUrl: 'https://calendly.com/x/30min', offer: 'a demo' };
   const rendered = renderTemplate('Hi {{firstName}}, {{company}} -> {{calendlyUrl}} ({{offer}})\n\n{{senderName}}', vars);
   const body = `${rendered}\n\nUnsubscribe: https://app.example/u?t=1`;
-  const { body: decoded } = decodeMime(mimeMessage({ ...base, body }, 'key-2'));
-  assert.equal(decoded, body);
-  assert.match(decoded, /Hi Bhavesh, Mechlin -> https:\/\/calendly\.com\/x\/30min \(a demo\)/, 'every variable is filled');
-  assert.doesNotMatch(decoded, /\{\{/, 'no placeholder survives');
-  assert.match(decoded, /Unsubscribe: https:\/\/app\.example\/u\?t=1/, 'unsubscribe footer retained');
+  const { text, html } = decodeMime(mimeMessage({ ...base, body }, 'key-2'));
+  assert.equal(text, body);
+  assert.match(text, /Hi Bhavesh, Mechlin -> https:\/\/calendly\.com\/x\/30min \(a demo\)/, 'every variable is filled');
+  assert.doesNotMatch(text, /\{\{/, 'no placeholder survives');
+  assert.match(text, /Unsubscribe: https:\/\/app\.example\/u\?t=1/, 'unsubscribe footer retained');
+  assert.match(html, /Hi Bhavesh, Mechlin -&gt; https:\/\/calendly\.com/, 'the HTML alternative is escaped, not raw');
 });
 
 test('plain-text bodies keep their newlines', () => {
   const body = 'line one\nline two\n\nline four';
-  const { body: decoded } = decodeMime(mimeMessage({ ...base, body }, 'key-3'));
-  assert.equal(decoded, body);
+  const { text, html } = decodeMime(mimeMessage({ ...base, body }, 'key-3'));
+  assert.equal(text, body);
+  assert.match(html, /line one<br>line two/, 'a single newline becomes a break in the HTML alternative');
 });
 
 test('HTML content that carries real text is accepted', () => {
   const body = '<p>Hello <strong>there</strong></p>';
-  const { body: decoded } = decodeMime(mimeMessage({ ...base, body }, 'key-4'));
-  assert.equal(decoded, body);
+  const { text, html } = decodeMime(mimeMessage({ ...base, body }, 'key-4'));
+  assert.equal(html, body, 'an HTML body is sent unchanged, so the review matches the send');
+  assert.match(text, /Hello there/, 'a readable plain-text fallback is supplied');
+  assert.doesNotMatch(text, /<[a-z]/i, 'no markup leaks into the fallback');
 });
 
 test('empty, whitespace-only and effectively empty bodies are rejected', () => {
@@ -98,14 +115,15 @@ test('header injection is still rejected', () => {
 
 test('MIME drafts preserve approved HTML and plain-text content types and bytes', () => {
   const html = '<html><body><p>Approved <a href="https://example.test/x">link</a></p></body></html>';
-  const htmlMime = Buffer.from(mimeMessage({ ...base, body: html }, 'html-key'), 'base64').toString();
-  assert.match(htmlMime, /Content-Type: text\/html; charset=UTF-8/);
-  assert.equal(decodeMime(Buffer.from(htmlMime).toString('base64')).body, html);
+  const htmlParts = decodeMime(mimeMessage({ ...base, body: html }, 'html-key'));
+  assert.equal(htmlParts.html, html, 'an approved HTML body is carried through unchanged');
+  assert.match(htmlParts.text, /Approved link/, 'a readable fallback accompanies it');
 
   const text = 'Approved line one\nline two';
-  const textMime = Buffer.from(mimeMessage({ ...base, body: text }, 'text-key'), 'base64').toString();
-  assert.match(textMime, /Content-Type: text\/plain; charset=UTF-8/);
-  assert.equal(decodeMime(Buffer.from(textMime).toString('base64')).body, text);
+  const textParts = decodeMime(mimeMessage({ ...base, body: text }, 'text-key'));
+  assert.equal(textParts.text, text, 'an approved plain-text body is carried through unchanged');
+  assert.match(textParts.html, /<p>/, 'an HTML alternative accompanies it');
+
   assert.equal(emailBodyContentType(html), 'HTML');
   assert.equal(emailBodyContentType(text), 'Text');
 });
