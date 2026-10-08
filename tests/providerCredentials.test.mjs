@@ -13,9 +13,22 @@ const json = (status, body = {}) => new Response(JSON.stringify(body), { status 
 const fail = () => { throw new TypeError('fetch failed'); };
 
 test('Apollo key probe: a refusal is named as an auth failure, not a dead connection', async t => {
-  await t.test('200 means the vendor accepted the key', async () => {
-    const r = await probeApollo('AIza-good-key', async () => json(200, { is_authenticated: true }));
+  await t.test('200 with is_logged_in true means the vendor accepted the key', async () => {
+    const r = await probeApollo('AIza-good-key', async () => json(200, { healthy: true, is_logged_in: true }));
     assert.equal(r.ok, true); assert.equal(r.code, 'vendor_auth_ok');
+  });
+  // Measured against the live API: a fabricated key answers 200 with is_logged_in false. Treating the
+  // status code as the verdict reported an invalid key as working, which is worse than no check.
+  await t.test('200 with is_logged_in false is a rejected key, not a pass', async () => {
+    const r = await probeApollo('AIza-fabricated', async () => json(200, { healthy: true, is_logged_in: false }));
+    assert.equal(r.ok, false, 'a 200 alone must not mean the key works');
+    assert.equal(r.code, 'vendor_auth');
+  });
+  await t.test('200 with no recognisable auth field is not a pass', async () => {
+    for (const body of [{}, { is_logged_in: 'true' }, { healthy: true }, 'not json']) {
+      const r = await probeApollo('k', async () => body === 'not json' ? new Response('not json', { status: 200 }) : json(200, body));
+      assert.equal(r.ok, false, `must not pass on ${JSON.stringify(body)}`);
+    }
   });
   await t.test('401 and 403 are reported as a rejected key', async () => {
     for (const status of [401, 403]) {

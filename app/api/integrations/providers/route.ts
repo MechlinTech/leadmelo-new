@@ -33,7 +33,7 @@ export const GET = endpoint(async req => {
   const user = await authenticate(req);
   const secrets = await loadProviderSecrets(user.tenantId);
   const state = await gatewayCredentialState(user.tenantId, secrets);
-  return Response.json({ ...configuredFlags(secrets), gatewaySynced: state ? state.apollo || state.hunter : null, gatewayPersisted: state?.persisted ?? null });
+  return Response.json({ ...configuredFlags(secrets), gatewaySynced: state ? state.apollo || state.hunter : null });
 });
 
 export const PUT = endpoint(async req => {
@@ -64,14 +64,13 @@ export const PUT = endpoint(async req => {
 
   // The gateway keeps its own copy, so a save is not finished until the gateway has it. A gateway
   // that cannot be reached is reported, not thrown: the credential is safely stored either way and
-  // the operator can retry the sync.
-  let sync: { ok: boolean; apollo: boolean; hunter: boolean; persisted: boolean } | null = null;
+  // discovery or verification re-pushes on the next run.
   let syncError: string | null = null;
   const secrets = await loadProviderSecrets(user.tenantId);
   if (secrets.gatewayKey) {
-    try { sync = await pushCredentialsToGateway(user.tenantId, secrets); }
+    try { await pushCredentialsToGateway(user.tenantId, secrets); }
     catch (e) { syncError = e instanceof HttpError ? e.message : 'gateway_unreachable'; }
-  } else if (clear.has('gateway')) syncError = null;
+  }
 
   await db.auditEvent.create({ data: { tenantId: user.tenantId, actorUserId: user.id, action: 'provider_credentials_updated' } });
   const state = await gatewayCredentialState(user.tenantId, secrets);
@@ -79,7 +78,6 @@ export const PUT = endpoint(async req => {
     ok: true, saved: changed,
     ...configuredFlags(secrets),
     gatewaySynced: state ? state.apollo || state.hunter : null,
-    gatewayPersisted: state?.persisted ?? null,
     gatewaySyncError: syncError
   });
 });

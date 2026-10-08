@@ -8,7 +8,7 @@ import { showToast } from './Toaster';
 // empty and is labelled from a boolean; "leave blank to keep" is how an existing key is preserved.
 type Status = {
   gatewayConfigured: boolean; apolloConfigured: boolean; hunterConfigured: boolean;
-  gatewaySynced: boolean | null; gatewayPersisted: boolean | null;
+  gatewaySynced: boolean | null;
 };
 type Verdict = { provider: string; ok: boolean; code: string; detail: string };
 const PROVIDERS = [
@@ -74,7 +74,7 @@ export default function ProviderCredentials() {
   return <section aria-labelledby="provider-creds-title">
     <h2 id="provider-creds-title">Provider credentials</h2>
     <p className="muted">The credentials this workspace uses to find prospects (Apollo) and verify their email addresses (Hunter), plus the bearer token that identifies the workspace to the provider gateway. Values are encrypted before they are stored and are never sent back to this page: an existing key is shown only as saved. Leave a field blank to keep what is stored.</p>
-    {status && <p className="muted">Gateway keys: {status.gatewaySynced === null ? 'gateway not reachable, so the state is unknown' : status.gatewaySynced ? `sent${status.gatewayPersisted === false ? ' (held in memory only; they will be re-sent on the next run)' : ''}` : 'not sent yet'}.</p>}
+    {status && <p className="muted">Gateway keys: {status.gatewaySynced === null ? 'gateway not reachable, so the state is unknown' : status.gatewaySynced ? 'sent to the gateway' : 'not sent yet'}. The gateway holds them in memory only, so they are re-sent automatically whenever a discovery or verification run needs them.</p>}
     {error && <p role="alert" className="error" style={{ marginBottom: 16 }}>{error}</p>}
     <div className="editor">
       <div className="formGrid">

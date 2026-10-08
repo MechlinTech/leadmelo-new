@@ -134,9 +134,14 @@ const probe = (url: URL, headers: Record<string, string>, fetcher: typeof fetch)
   fetcher(url, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(PROBE_TIMEOUT), headers: { Accept: 'application/json', ...headers } });
 
 /**
- * Apollo key check against the free auth-health endpoint. A bad key answers 401/403.
- * NOT VERIFIED AGAINST A LIVE ACCOUNT: if the endpoint is retired a 404 is reported as
- * apollo_probe_unsupported rather than as a valid key, so the UI never shows a false pass.
+ * Apollo key check against the free auth-health endpoint.
+ *
+ * The status code alone is not enough: measured against the live API, an invalid key still answers
+ * HTTP 200 with {"healthy":true,"is_logged_in":false}, so treating 200 as success reported a
+ * fabricated key as working. The body is what decides, and is_logged_in must be exactly true.
+ * NOT VERIFIED AGAINST A LIVE ACCOUNT beyond that response shape: if the endpoint is retired a 404
+ * is reported as apollo_probe_unsupported rather than as a valid key, so the UI never shows a false
+ * pass.
  */
 export async function probeApollo(apiKey: string, fetcher: typeof fetch = fetch): Promise<ProbeResult> {
   let res: Response;
@@ -147,6 +152,9 @@ export async function probeApollo(apiKey: string, fetcher: typeof fetch = fetch)
   if (res.status === 404) return { ok: false, code: 'apollo_probe_unsupported', detail: 'Apollo no longer offers this auth endpoint, so the key could not be verified. Save it anyway and check discovery.' };
   if (res.status >= 500) return { ok: false, code: 'vendor_unavailable', detail: `Apollo returned HTTP ${res.status}. Try again shortly.` };
   if (!res.ok) return { ok: false, code: 'vendor_error', detail: `Apollo returned HTTP ${res.status}.` };
+  const body = await res.json().catch(() => null) as { is_logged_in?: unknown } | null;
+  if (body?.is_logged_in !== true)
+    return { ok: false, code: 'vendor_auth', detail: 'Apollo did not accept this API key. The health endpoint answered 200 but reported the key as not signed in.' };
   return { ok: true, code: 'vendor_auth_ok', detail: 'Apollo accepted this API key.' };
 }
 

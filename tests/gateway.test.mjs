@@ -304,7 +304,7 @@ test('PUT /credentials: a tenant writes its own vendor keys using its bearer tok
     await t.test('GET reports presence as booleans and never echoes a key', async () => {
       const res = await call('GET', BEARER); const body = await res.json();
       assert.equal(res.status, 200);
-      assert.deepEqual(body, { tenantId: 't1', apollo: true, hunter: true });
+      assert.deepEqual(body, { tenantId: 't1', apollo: true, hunter: true, inMemory: true });
       assert.ok(!JSON.stringify(body).includes('apollo-key-123'), 'no key value in the response');
     });
 
@@ -326,7 +326,7 @@ test('PUT /credentials: a tenant writes its own vendor keys using its bearer tok
 
     await t.test('an explicit null clears one key', async () => {
       await call('PUT', BEARER, { hunterKey: null });
-      assert.deepEqual(await (await call('GET', BEARER)).json(), { tenantId: 't1', apollo: true, hunter: false });
+      assert.deepEqual(await (await call('GET', BEARER)).json(), { tenantId: 't1', apollo: true, hunter: false, inMemory: true });
     });
 
     await t.test('one tenant cannot touch another tenant\'s keys', async () => {
@@ -340,11 +340,13 @@ test('PUT /credentials: a tenant writes its own vendor keys using its bearer tok
       assert.equal((await call('PUT', BEARER, { unknown: 'x' })).status, 400);
     });
 
-    await t.test('persistence is reported honestly when the config file is read-only', async () => {
+    await t.test('the gateway holds keys in memory and never claims to have written them', async () => {
       const body = await (await call('PUT', BEARER, { apolloKey: 'apollo-key-1234' })).json();
-      // The harness sets no tenantsFile, so the gateway must say it only holds these in memory.
-      assert.equal(body.persisted, false);
       assert.equal(body.ok, true);
+      // The config directory is the operator's, mounted read-only, and holds vendor keys in
+      // plaintext. The gateway must not pretend otherwise, and must not expose a write path.
+      assert.equal(body.inMemory, true);
+      assert.ok(!('persisted' in body), 'there is no disk persistence to report');
     });
   } finally { await g.stop(); }
 });
