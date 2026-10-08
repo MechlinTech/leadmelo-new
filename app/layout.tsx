@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import { themeFromHeader } from '../lib/themes';
 import PwaRegister from '../components/PwaRegister';
 import ThemeSync from '../components/ThemeSync';
+import Toaster from '../components/Toaster';
 
 export const dynamic = 'force-dynamic';
 export const viewport: Viewport = {
@@ -26,7 +27,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <body suppressHydrationWarning>
       <script src="/leadmelo-boot.js" nonce={nonce} suppressHydrationWarning />
       <ThemeSync />
-      <a className="skip" href="#main">Skip to content</a>{children}<PwaRegister />
+      <a className="skip" href="#main">Skip to content</a>{children}<PwaRegister /><Toaster />
     </body>
   </html>;
 }

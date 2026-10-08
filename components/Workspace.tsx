@@ -19,6 +19,7 @@ import Pager, { pageSlice } from './Pager';
 import { api } from './api';
 import { userError } from '../lib/userErrors';
 import { useAppRole } from './AppRole';
+import { showToast } from './Toaster';
 
 type Row = Record<string, any>;
 type Section = 'overview' | 'icps' | 'campaigns' | 'settings' | 'leads' | 'automation-runs';
@@ -41,7 +42,7 @@ export default function Workspace({ section }: { section: Section }) {
   const [rows, setRows] = useState<Row[]>([]), [icps, setIcps] = useState<Row[]>([]), [settings, setSettings] = useState<Row | null>(null);
   const [outreach, setOutreach] = useState<Row[]>([]), [replies, setReplies] = useState<Row[]>([]);
   const [campaigns, setCampaigns] = useState<Row[]>([]);
-  const [error, setError] = useState(''), [notice, setNotice] = useState(''), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
+  const [error, setError] = useState(''), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false);
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [icpMode, setIcpMode] = useState<'new' | 'existing'>('new');
@@ -99,15 +100,19 @@ export default function Workspace({ section }: { section: Section }) {
     const editor = document.getElementById('campaign-editor');
     editor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [editingCampaignId, campaignFormKey]);
-  async function mutate(path: string, method: string, body?: unknown) {
-    setBusy(true); setError(''); setNotice('');
+  async function mutate(path: string, method: string, body?: unknown, successMessage?: string | null) {
+    setBusy(true); setError('');
     try {
       const result = await api(path, method, body);
-      setNotice(result.activation?.requested ? result.activation.started ? 'Campaign saved and autopilot started.' : `Campaign saved as draft. ${userError(result.activation.reason)}` : 'Saved');
+      if (result.activation?.requested) {
+        showToast(result.activation.started ? 'Campaign saved and autopilot started.' : `Campaign saved as draft. ${userError(result.activation.reason)}`);
+      } else if (successMessage !== null) {
+        showToast(successMessage || 'Saved');
+      }
       await load();
       return true;
     }
-    catch (e) { setError((e as Error).message); return false; }
+    catch (e) { showToast((e as Error).message, 'error'); return false; }
     finally { setBusy(false); }
   }
   function icpBody(form: FormData, prefix = '') {
@@ -122,8 +127,8 @@ export default function Workspace({ section }: { section: Section }) {
     if (section === 'icps') {
       const body = icpBody(form);
       if (editingIcpId) {
-        if (await mutate('icps', 'PATCH', { id: editingIcpId, ...body })) { setNotice(`Updated ICP “${body.name}”.`); setEditingIcpId(null); setIcpFormKey(k => k + 1); }
-      } else if (await mutate('icps', 'POST', body)) { setNotice(`Created ICP “${body.name}”.`); setIcpFormKey(k => k + 1); }
+        if (await mutate('icps', 'PATCH', { id: editingIcpId, ...body }, `Updated ICP “${body.name}”.`)) { setEditingIcpId(null); setIcpFormKey(k => k + 1); }
+      } else if (await mutate('icps', 'POST', body, `Created ICP “${body.name}”.`)) { setIcpFormKey(k => k + 1); }
     } else if (section === 'campaigns') {
       const body: Row = {};
       for (const key of ['name', 'offer', 'senderName', 'senderEmail', 'calendlyUrl', 'timezone', 'automationMode', 'outcomeType']) body[key] = value(form, key);
@@ -132,8 +137,7 @@ export default function Workspace({ section }: { section: Section }) {
       body.sequenceSteps = snapshotSteps().map((st, i) => ({ stepOrder: i + 1, waitBusinessDays: st.delay, subject: st.subject, body: st.body }));
       if (editingCampaignId) {
         body.icpId = value(form, 'icpId');
-        if (await mutate(`campaigns/${editingCampaignId}`, 'PUT', body)) {
-          setNotice('Campaign updated.');
+        if (await mutate(`campaigns/${editingCampaignId}`, 'PUT', body, 'Campaign updated.')) {
           setEditingCampaignId(null);
           setIcpMode('new');
           setSteps([{ id: 1, delay: 0, subject: '', body: FIRST_BODY }]);
@@ -159,9 +163,9 @@ export default function Workspace({ section }: { section: Section }) {
       body.providerCostCents = dollars('providerCost') ?? 0;
       body.messageRetentionDays = value(form, 'messageRetentionDays').trim() === '' ? null : number(form, 'messageRetentionDays');
       const address = value(form, 'postalAddress').trim();
-      if (address.length < 10) { setError('Enter a full business postal address of at least 10 characters, then save again.'); return; }
-      if (![body.dailySendCap, body.weeklyProspectCap, body.providerCostCents].every(n => Number.isFinite(n))) { setError('Some fields are invalid. Check the values and try again.'); return; }
-      if (await mutate('settings', 'PUT', body)) setNotice('Workspace settings saved.');
+      if (address.length < 10) { showToast('Enter a full business postal address of at least 10 characters, then save again.', 'error'); return; }
+      if (![body.dailySendCap, body.weeklyProspectCap, body.providerCostCents].every(n => Number.isFinite(n))) { showToast('Some fields are invalid. Check the values and try again.', 'error'); return; }
+      if (await mutate('settings', 'PUT', body, 'Workspace settings saved.')) return;
     }
   }
   async function submitLead(event: FormEvent<HTMLFormElement>) {
@@ -169,14 +173,14 @@ export default function Workspace({ section }: { section: Section }) {
     const form = new FormData(event.currentTarget);
     const body: Row = { company: value(form, 'company'), domain: value(form, 'domain') || undefined, contactName: value(form, 'contactName') || undefined, contactEmail: value(form, 'contactEmail') || undefined, signalSummary: value(form, 'signalSummary') || undefined };
     if (value(form, 'score')) body.score = number(form, 'score');
-    if (await mutate('leads', 'POST', body)) { setNotice('Prospect added for review.'); event.currentTarget.reset(); }
+    if (await mutate('leads', 'POST', body, 'Prospect added for review.')) { event.currentTarget.reset(); }
   }
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const body: Row = { buyerName: value(form, 'buyerName'), buyerEmail: value(form, 'buyerEmail'), scheduledStart: value(form, 'scheduledStart'), notes: value(form, 'notes') || undefined };
     if (value(form, 'campaignId')) body.campaignId = value(form, 'campaignId');
-    if (await mutate('appointments', 'POST', body)) { setNotice('Meeting recorded.'); event.currentTarget.reset(); }
+    if (await mutate('appointments', 'POST', body, 'Meeting recorded.')) { event.currentTarget.reset(); }
   }
   function beginEditIcp(r: Row) {
     setEditingIcpId(r.id);
@@ -209,34 +213,107 @@ export default function Workspace({ section }: { section: Section }) {
     });
   }, [rows, campaignQuery, campaignSort, campaignStatus]);
   const campaignPageData = pageSlice(visibleCampaigns, campaignPage, 10);
+  const getLeadCampaignName = (r: Row) => r.contacts?.[0]?.enrollments?.[0]?.campaign?.name || r.outreachEvents?.[0]?.campaign?.name || null;
   const visibleLeads = useMemo(() => {
     const q = leadQuery.trim().toLowerCase();
-    return rows.filter(r => !q || [r.company, r.contactName, r.contactEmail, r.domain, r.qualification].some(v => String(v ?? '').toLowerCase().includes(q)));
+    return rows.filter(r => !q || [r.company, r.contactName, r.contactEmail, r.domain, r.qualification, getLeadCampaignName(r)].some(v => String(v ?? '').toLowerCase().includes(q)));
   }, [rows, leadQuery]);
   const leadPageData = pageSlice(visibleLeads, leadPage, 10);
   const meetingPageData = pageSlice(rows, meetingPage, 10);
   const icpPageData = pageSlice(rows, icpPage, 10);
-  const runPageData = pageSlice(rows, runPage, 10);
-  const outreachPageData = pageSlice(outreach, outreachPage, 10);
-  const replyPageData = pageSlice(replies, replyPage, 10);
+  const sortedRuns = useMemo(() => section === 'automation-runs' ? [...rows].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : [], [rows, section]);
+  const runPageData = pageSlice(sortedRuns, runPage, 10);
+  const sortedOutreach = useMemo(() => [...outreach].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [outreach]);
+  const outreachPageData = pageSlice(sortedOutreach, outreachPage, 10);
+  const sortedReplies = useMemo(() => [...replies].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [replies]);
+  const replyPageData = pageSlice(sortedReplies, replyPage, 10);
   // "All meetings" is the unfiltered view; any narrower date window is a filtered result.
   const meetingsFiltered = meetingHours > 0;
   const meetingsEmpty = !loading && !error && meetingPageData.total === 0;
   const title = { overview: 'Meetings', icps: 'Ideal customer profiles', campaigns: 'Campaigns', settings: 'Workspace settings', leads: 'Prospects', 'automation-runs': 'Automation & exceptions' }[section];
   return <>
     <div className="toolbar"><h1>{title}</h1><button onClick={() => { setIsRefreshing(true); window.location.reload(); }} disabled={loading || isRefreshing || busy}>{isRefreshing ? <span className="spinner" aria-hidden="true" /> : null} Refresh</button></div>
-    {error && <p role="alert" className="error toast" key={error}>{error}</p>}{notice && <p role="status" className="notice toast" key={notice}>{notice}</p>}
+    {error && <p role="alert" className="error" style={{ marginBottom: 16 }}>{error}</p>}
     <>
       {section === 'overview' && <DigestPanel />}
       {section === 'settings' && <><PlanUsagePanel /><AppearanceSettings /><AiSettings /><MicrosoftSettings /><SecuritySettings /><TeamMembers /><PrivacyTools /></>}
       {section === 'automation-runs' && <OperationalAlerts />}
       {section === 'overview' && <>
-        <div className="toolbar">
-          <p>{rows.filter(r => r.qualified && r.status === 'BOOKED').length} qualified booked meetings in this view.</p>
-          <label>Show <select aria-label="Meeting date range" value={meetingHours} onChange={e => { setMeetingHours(Number(e.target.value)); setMeetingPage(1); }}>{MEETING_WINDOWS.map(([h, label]) => <option key={h} value={h}>{label}</option>)}</select></label>
+        <div className="toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <p style={{ margin: 0, color: 'var(--muted)', fontSize: '15px' }}>{rows.filter(r => r.qualified && r.status === 'BOOKED').length} qualified booked meetings in this view.</p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: 0, fontWeight: 500 }}>
+            Show 
+            <select aria-label="Meeting date range" style={{ minWidth: '180px', padding: '8px 12px' }} value={meetingHours} onChange={e => { setMeetingHours(Number(e.target.value)); setMeetingPage(1); }}>
+              {MEETING_WINDOWS.map(([h, label]) => <option key={h} value={h}>{label}</option>)}
+            </select>
+          </label>
         </div>
-        {loading && <p role="status" className="muted">Loading meetings…</p>}
-        <div className="tableWrap" tabIndex={0} role="region" aria-label="Meetings table"><table><thead><tr><th>Buyer</th><th>Campaign</th><th>Time</th><th>Status</th><th>Qualification</th><th>Outcome</th></tr></thead><tbody>{meetingPageData.slice.map(r => <tr key={r.id}><td>{r.contact?.fullName}<br />{r.contact?.email}</td><td>{r.campaign?.name}</td><td>{r.scheduledStart ? new Date(r.scheduledStart).toLocaleString() : 'Pending'}</td><td>{r.status}</td><td>{r.qualified ? 'Qualified' : <><span>Review required</span>{canWrite && r.status === 'BOOKED' && <button disabled={busy} onClick={() => void mutate('appointments', 'PATCH', { id: r.id, qualified: true, outcomeReason: 'Buyer, need and ICP evidence reviewed by meeting owner' })}>Approve</button>}</>}</td><td>{canWrite ? <select aria-label="Record meeting outcome" defaultValue="" disabled={busy || r.status === 'CANCELED'} onChange={e => { if (e.target.value) void mutate('appointments', 'PATCH', { id: r.id, status: e.target.value, outcomeReason: 'Recorded by meeting owner' }); }}><option value="">Record outcome</option>{['COMPLETED', 'NO_SHOW', 'DISQUALIFIED', 'WON', 'LOST'].map(v => <option key={v}>{v}</option>)}</select> : '—'}</td></tr>)}{meetingsEmpty && <tr className="emptyRow"><td colSpan={6}>{meetingsFiltered ? <><strong>No meetings match the selected filter.</strong><p className="muted">Widen the date range to see meetings booked outside this window.</p></> : <><strong>No meetings found</strong><p className="muted">Scheduled or manually recorded meetings will appear here.</p></>}</td></tr>}</tbody></table></div>
+        {loading && <p role="status" className="muted" style={{ marginBottom: '16px' }}>Loading meetings…</p>}
+        <div className="tableWrap" tabIndex={0} role="region" aria-label="Meetings table" style={{ boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', borderRadius: '8px', overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+            <thead>
+              <tr style={{ backgroundColor: 'rgba(0, 0, 0, 0.02)' }}>
+                <th style={{ width: '22%', padding: '16px 20px', textAlign: 'left', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Buyer</th>
+                <th style={{ width: '22%', padding: '16px 20px', textAlign: 'left', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Campaign</th>
+                <th style={{ width: '16%', padding: '16px 20px', textAlign: 'left', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Time</th>
+                <th style={{ width: '10%', padding: '16px 20px', textAlign: 'left', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Status</th>
+                <th style={{ width: '14%', padding: '16px 20px', textAlign: 'left', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Qualification</th>
+                <th style={{ width: '16%', padding: '16px 12px', textAlign: 'left', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              {meetingPageData.slice.map((r, i) => 
+                <tr key={r.id} style={{ borderBottom: i === meetingPageData.slice.length - 1 ? 'none' : '1px solid var(--border)' }}>
+                  <td style={{ padding: '20px', verticalAlign: 'middle' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <strong style={{ wordBreak: 'break-word', fontSize: '15px', color: 'var(--text)' }}>{r.contact?.fullName}</strong>
+                      <span className="muted" style={{ wordBreak: 'break-word', fontSize: '14px' }}>{r.contact?.email}</span>
+                    </div>
+                  </td>
+                  <td style={{ padding: '20px', verticalAlign: 'middle', wordBreak: 'break-word', fontSize: '14px' }}>
+                    {r.campaign?.name}
+                  </td>
+                  <td style={{ padding: '20px', verticalAlign: 'middle', whiteSpace: 'nowrap', fontSize: '14px' }}>
+                    {r.scheduledStart ? new Date(r.scheduledStart).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Pending'}
+                  </td>
+                  <td style={{ padding: '20px', verticalAlign: 'middle', fontSize: '14px', fontWeight: 500 }}>
+                    {r.status}
+                  </td>
+                  <td style={{ padding: '20px', verticalAlign: 'middle', fontSize: '14px' }}>
+                    {r.qualified ? 'Qualified' : 
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-start' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>Review required</span>
+                        {canWrite && r.status === 'BOOKED' && 
+                          <button type="button" disabled={busy} style={{ padding: '6px 16px', fontSize: '14px' }} onClick={() => void mutate('appointments', 'PATCH', { id: r.id, qualified: true, outcomeReason: 'Buyer, need and ICP evidence reviewed by meeting owner' })}>Approve</button>
+                        }
+                      </div>
+                    }
+                  </td>
+                  <td style={{ padding: '16px 12px', verticalAlign: 'middle' }}>
+                    {canWrite ? 
+                      <select aria-label="Record meeting outcome" style={{ width: '100%', minWidth: '130px', padding: '6px 8px', fontSize: '14px' }} defaultValue="" disabled={busy || r.status === 'CANCELED'} onChange={e => { if (e.target.value) void mutate('appointments', 'PATCH', { id: r.id, status: e.target.value, outcomeReason: 'Recorded by meeting owner' }); }}>
+                        <option value="">Record outcome</option>
+                        {['COMPLETED', 'NO_SHOW', 'DISQUALIFIED', 'WON', 'LOST'].map(v => <option key={v}>{v.replaceAll('_', ' ')}</option>)}
+                      </select> 
+                    : <span style={{ color: 'var(--muted)' }}>—</span>}
+                  </td>
+                </tr>
+              )}
+              {meetingsEmpty && 
+                <tr className="emptyRow"><td colSpan={6}>
+                    <div style={{ padding: '48px 20px', textAlign: 'center' }}>
+                      {meetingsFiltered ? 
+                        <><strong>No meetings match the selected filter.</strong><p className="muted" style={{ marginTop: '12px', fontSize: '14px' }}>Widen the date range to see meetings booked outside this window.</p></> 
+                      : 
+                        <><strong>No meetings found</strong><p className="muted" style={{ marginTop: '12px', fontSize: '14px' }}>Scheduled or manually recorded meetings will appear here.</p></>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
         <Pager page={meetingPageData.page} pages={meetingPageData.pages} total={meetingPageData.total} label="meetings" onPage={setMeetingPage} />
         {canWrite && <><h2>Record a meeting</h2><p className="muted">Use this for a booking that arrived outside Calendly, or to verify the meetings table.</p>
           <form className="editor" onSubmit={submitMeeting}><div className="formGrid">
@@ -247,7 +324,7 @@ export default function Workspace({ section }: { section: Section }) {
             <Field name="notes" label="Notes (optional)" required={false} />
           </div><button disabled={busy}>Record meeting</button></form></>}
       </>}
-      {section === 'icps' && <><ul className="recordList">{icpPageData.slice.map(r => <li key={r.id}><strong>{r.name}</strong> &middot; {r.offer}{r.active === false && <span className="pill">Inactive</span>}<p>{(r.geographies ?? []).join(', ')} &middot; Minimum score {r.minScore}{r.weeklyAppointmentGoal != null && <> &middot; Weekly goal {r.weeklyAppointmentGoal}</>}</p><p className="muted">Industries: {(r.industries ?? []).join(', ') || '—'}. Sizes: {(r.companySizes ?? []).join(', ') || '—'}. Titles: {(r.buyerTitles ?? []).join(', ') || '—'}. Signals: {(r.buyingSignals ?? []).join(', ') || '—'}. Technologies: {(r.technologies ?? []).join(', ') || '—'}. Exclusions: {(r.exclusionRules ?? []).join(', ') || '—'}.</p>{canWrite && <div className="toolbar"><button type="button" className="secondary" disabled={busy} onClick={() => beginEditIcp(r)}>Edit</button><button type="button" className="secondary" disabled={busy} onClick={async () => { setActioningId(r.id); const ok = await mutate('icps', 'POST', { duplicateFrom: r.id }); setActioningId(null); if (ok) setNotice(`Duplicated “${r.name}”.`); }}>{actioningId === r.id ? <span className="spinner" aria-hidden="true" /> : null}Duplicate</button><button type="button" className="secondary" disabled={busy} onClick={async () => { if (window.confirm(`Remove “${r.name}”? Campaigns that use it will keep a deactivated copy.`)) { setActioningId(r.id); const ok = await mutate(`icps?id=${encodeURIComponent(r.id)}`, 'DELETE'); setActioningId(null); if (ok) setNotice('ICP removed.'); } }}>{actioningId === r.id ? <span className="spinner" aria-hidden="true" /> : null}Delete</button></div>}</li>)}</ul>
+      {section === 'icps' && <><ul className="recordList">{icpPageData.slice.map(r => <li key={r.id}><strong>{r.name}</strong> &middot; {r.offer}{r.active === false && <span className="pill">Inactive</span>}<p>{(r.geographies ?? []).join(', ')} &middot; Minimum score {r.minScore}{r.weeklyAppointmentGoal != null && <> &middot; Weekly goal {r.weeklyAppointmentGoal}</>}</p><p className="muted">Industries: {(r.industries ?? []).join(', ') || '—'}. Sizes: {(r.companySizes ?? []).join(', ') || '—'}. Titles: {(r.buyerTitles ?? []).join(', ') || '—'}. Signals: {(r.buyingSignals ?? []).join(', ') || '—'}. Technologies: {(r.technologies ?? []).join(', ') || '—'}. Exclusions: {(r.exclusionRules ?? []).join(', ') || '—'}.</p>{canWrite && <div className="toolbar"><button type="button" className="secondary" disabled={busy} onClick={() => beginEditIcp(r)}>Edit</button><button type="button" className="secondary" disabled={busy} onClick={async () => { setActioningId(r.id); await mutate('icps', 'POST', { duplicateFrom: r.id }, `Duplicated “${r.name}”.`); setActioningId(null); }}>{actioningId === r.id ? <span className="spinner" aria-hidden="true" /> : null}Duplicate</button><button type="button" className="secondary" disabled={busy} onClick={async () => { if (window.confirm(`Remove “${r.name}”? Campaigns that use it will keep a deactivated copy.`)) { setActioningId(r.id); await mutate(`icps?id=${encodeURIComponent(r.id)}`, 'DELETE', undefined, 'ICP removed.'); setActioningId(null); } }}>{actioningId === r.id ? <span className="spinner" aria-hidden="true" /> : null}Delete</button></div>}</li>)}</ul>
         <Pager page={icpPageData.page} pages={icpPageData.pages} total={icpPageData.total} label="profiles" onPage={setIcpPage} />
         <h2 id="icp-editor">{editingIcpId ? 'Edit ICP' : 'Create ICP'}</h2>
         {canWrite ? <><AiAssist onApply={applyAi} />
@@ -296,7 +373,7 @@ export default function Workspace({ section }: { section: Section }) {
             {!editingCampaignId && <label><input type="checkbox" name="startImmediately" /> Start the autonomous campaign immediately when all safety and integration checks pass</label>}
             <div className="toolbar"><button type="button" disabled={steps.length >= 10} onClick={() => setSteps([...snapshotSteps(), { id: Date.now(), delay: 3, subject: '', body: '' }])}>Add follow-up</button><button disabled={busy}>{editingCampaignId ? 'Save campaign' : 'Create campaign'}</button>{editingCampaignId && <button type="button" className="secondary" onClick={cancelCampaignEdit}>Cancel edit</button>}</div>
           </form></>}
-        <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><thead><tr><th>Campaign</th><th>ICP</th><th>Status</th><th>Mode</th><th>Goal</th><th style={{ paddingRight: '80px' }}>Control</th></tr></thead><tbody>{campaignPageData.slice.map(r => <tr key={r.id}><td>{r.name}</td><td>{r.icp?.name}</td><td>{r.status}</td><td>{(() => { const m = r.automationMode.replaceAll('_', ' ').toLowerCase(); return m.charAt(0).toUpperCase() + m.slice(1); })()}</td><td>{r.weeklyAppointmentGoal} meetings/week</td><td style={{ paddingRight: '80px' }}><div className="toolbar" style={{ flexWrap: 'wrap', gap: '8px' }}>{canWrite ? <><button disabled={busy} onClick={async () => { setActioningId(r.id); await mutate('campaigns', 'PATCH', { id: r.id, status: r.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE' }); setActioningId(null); }}>{actioningId === r.id ? <span className="spinner" aria-hidden="true" /> : null}{actioningId === r.id ? 'Working…' : r.status === 'ACTIVE' ? 'Pause' : r.status === 'COMPLETE' ? 'Restart' : r.status === 'PAUSED' ? 'Reactivate' : 'Activate'}</button><button type="button" className="secondary" disabled={busy} onClick={() => beginEditCampaign(r)}>Edit</button></> : <span className="muted">View only</span>}<CampaignHistory id={r.id} name={r.name} onChanged={() => void load()} /></div></td></tr>)}</tbody></table></div>
+        <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><thead><tr><th>Campaign</th><th>ICP</th><th>Status</th><th>Mode</th><th>Goal</th><th style={{ paddingRight: '80px' }}>Control</th></tr></thead><tbody>{campaignPageData.slice.map(r => <tr key={r.id}><td>{r.name}</td><td>{r.icp?.name}</td><td>{r.status}</td><td>{(() => { const m = r.automationMode.replaceAll('_', ' ').toLowerCase(); return m.charAt(0).toUpperCase() + m.slice(1); })()}</td><td>{r.weeklyAppointmentGoal} meetings/week</td><td style={{ paddingRight: '80px' }}><div className="toolbar" style={{ flexWrap: 'wrap', gap: '8px' }}>{canWrite ? <><button disabled={actioningId === r.id} onClick={async () => { setActioningId(r.id); try { const next = r.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'; await api('campaigns', 'PATCH', { id: r.id, status: next }); setRows(prev => prev.map(row => row.id === r.id ? { ...row, status: next } : row)); } catch(e) { showToast((e as Error).message, 'error'); } finally { setActioningId(null); } }}>{actioningId === r.id ? <span className="spinner" aria-hidden="true" /> : null}{actioningId === r.id ? 'Working…' : r.status === 'ACTIVE' ? 'Pause' : r.status === 'COMPLETE' ? 'Restart' : r.status === 'PAUSED' ? 'Reactivate' : 'Activate'}</button><button type="button" className="secondary" disabled={actioningId === r.id} onClick={() => beginEditCampaign(r)}>Edit</button></> : <span className="muted">View only</span>}<CampaignHistory id={r.id} name={r.name} onChanged={(action, campaign) => { if (action === 'add') { setRows(prev => [campaign, ...prev]); } else if (action === 'update') { setRows(prev => prev.map(row => row.id === campaign.id ? campaign : row)); } }} /></div></td></tr>)}</tbody></table></div>
         <Pager page={campaignPageData.page} pages={campaignPageData.pages} total={campaignPageData.total} label="campaigns" onPage={setCampaignPage} />
       </>}
       {section === 'settings' && settings && <form key={String(settings.automationEnabled) + settings.postalAddress + settings.companyName} className="editor" onSubmit={submit} aria-labelledby="workspace-settings-title"><h2 id="workspace-settings-title">Workspace sending and integrations</h2><p>Gateway: {settings.gatewayConfigured ? 'Configured' : 'Not connected'}. Webhooks: {settings.webhookConfigured ? 'Configured' : 'Not connected'}. Calendly: {settings.calendlyConfigured ? 'Signing key set' : 'Not connected'}{settings.calendlyReconcileConfigured ? `, missed-booking recovery on${settings.calendlyReconciledAt ? ` (last run ${new Date(settings.calendlyReconciledAt).toLocaleString()})` : ''}` : ''}. Sending: {settings.outboundEnabled ? 'Enabled by operator' : 'Disabled by operator'}.</p><label><input type="checkbox" name="automationEnabled" defaultChecked={settings.automationEnabled} disabled={!isAdmin} /> Enable tenant automation</label><div className="formGrid"><Field name="companyName" label="Company / workspace name" initial={settings.companyName ?? ''} minLength={2} hint="Shown to your team and on legal pages" /><Field name="dailySendCap" label="Tenant daily email cap" type="number" initial={settings.dailySendCap} min={1} hint="At least 1" /><Field name="weeklyProspectCap" label="Tenant weekly prospect cap" type="number" initial={settings.weeklyProspectCap} min={1} /><Field name="postalAddress" label="Business postal address" initial={settings.postalAddress} minLength={10} hint="Full street address, at least 10 characters" /><Field name="gatewayKey" label="Replace gateway credential" type="password" required={false} /><Field name="webhookSecret" label="Replace webhook signing secret" type="password" required={false} /><Field name="calendlySigningKey" label="Replace Calendly webhook signing key" type="password" required={false} /><Field name="calendlyToken" label="Calendly access token for missed-booking recovery (read-only use)" type="password" required={false} /><Field name="calendlyOrganizationUri" label="Calendly organization URI (https://api.calendly.com/organizations/...)" initial={settings.calendlyOrganizationUri ?? ''} required={false} /><Field name="monthlySpendCap" label="Monthly provider spend cap in USD (blank = no cap)" type="number" step="0.01" initial={settings.monthlySpendCapCents === null || settings.monthlySpendCapCents === undefined ? '' : settings.monthlySpendCapCents / 100} required={false} /><Field name="providerCost" label="Cost per discovered prospect in USD" type="number" step="0.01" initial={(settings.providerCostCents ?? 0) / 100} required={false} /><Field name="messageRetentionDays" label="Redact message text and replies after N days (30 or more; blank = keep)" type="number" initial={settings.messageRetentionDays ?? ''} required={false} min={30} /></div><p className="muted">Spend caps only limit what the discovery step buys; they need a cost per prospect above zero to take effect.</p>{isAdmin ? <button disabled={busy}>Save settings</button> : <p className="muted">Only a workspace administrator can save these settings.</p>}</form>}
@@ -310,14 +387,17 @@ export default function Workspace({ section }: { section: Section }) {
           <Field name="score" label="Score 0–100 (optional)" type="number" min={0} max={100} required={false} />
         </div><button disabled={busy}>Add prospect</button></form>
           <LeadImport onImported={() => { setLeadPage(1); void load(); }} /></>}
-        <div className="toolbar" style={{ marginBottom: '16px' }}><label style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontWeight: 500 }}>Search: <input className="input" aria-label="Search prospects" value={leadQuery} onChange={e => { setLeadQuery(e.target.value); setLeadPage(1); }} placeholder="Company, name, email" style={{ margin: 0, width: '300px' }} /></label></div>
-        <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><thead><tr><th>Company</th><th>Score</th><th>Qualification</th><th>Signal</th><th>Source</th></tr></thead><tbody>{leadPageData.slice.map(r => <tr key={r.id}><td>{r.company}{r.contactName && <><br />{r.contactName}</>}{r.contactEmail && <><br />{r.contactEmail}</>}</td><td>{r.score}</td><td>{r.qualification}</td><td>{r.signalSummary}</td><td>{r.source && /^https?:\/\//.test(r.source) ? <a href={r.source} rel="noreferrer" target="_blank">Evidence</a> : r.source || '—'}</td></tr>)}</tbody></table></div>
+        <div className="toolbar" style={{ marginBottom: '16px' }}><label style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0, fontWeight: 500 }}>Search: <input className="input" aria-label="Search prospects" value={leadQuery} onChange={e => { setLeadQuery(e.target.value); setLeadPage(1); }} placeholder="Company, name, email, campaign" style={{ margin: 0, width: '300px' }} /></label></div>
+        <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><thead><tr><th>Company</th><th>Score</th><th>Qualification</th><th>Signal</th><th>Source</th><th>Campaign</th></tr></thead><tbody>{leadPageData.slice.map(r => <tr key={r.id}><td>{r.company}{r.contactName && <><br />{r.contactName}</>}{r.contactEmail && <><br />{r.contactEmail}</>}</td><td>{r.score}</td><td>{r.qualification}</td><td>{r.signalSummary}</td><td>{r.source && /^https?:\/\//.test(r.source) ? <a href={r.source} rel="noreferrer" target="_blank">Evidence</a> : r.source || '—'}</td><td>{getLeadCampaignName(r) || '—'}</td></tr>)}</tbody></table></div>
         <Pager page={leadPageData.page} pages={leadPageData.pages} total={leadPageData.total} label="prospects" onPage={setLeadPage} />
       </>}
       {section === 'automation-runs' && <><AutomationRules />
-        <h2>Runs</h2><p className="muted">Discovery runs are queued and retried automatically by the worker; you do not need to keep this page open.</p><div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><thead><tr><th>Campaign</th><th>Run</th><th>Status</th><th>Discovered</th><th>Queued</th><th>Detail</th></tr></thead><tbody>{rows.map(r => <tr key={r.id}><td>{r.campaign?.name ?? '—'}</td><td>{new Date(r.createdAt).toLocaleString()}</td><td>{r.status}{r.attempts > 0 && <> &middot; attempt {r.attempts}/3</>}</td><td>{r.prospectsFound}</td><td>{r.messagesQueued}</td><td>{r.errors?.code ? userError(r.errors.code) : r.status === 'QUEUED' ? `Queued${r.availableAt && new Date(r.availableAt) > new Date() ? ` · next attempt ${new Date(r.availableAt).toLocaleTimeString()}` : ''}` : r.status === 'RUNNING' ? 'Processing' : 'Completed'}</td></tr>)}</tbody></table></div>
-        <h2>Outreach queue</h2>{outreach.length > 25 && <p className="muted">Showing the latest 25 of {outreach.length}.</p>}<ul className="recordList">{outreach.slice(0, 25).map(r => { const step = r.campaign?.sequenceSteps?.find((s: Row) => s.stepOrder === r.stepOrder); const vars: Record<string, string> = { firstName: String(r.contact?.fullName ?? 'there').split(/\s+/)[0] || 'there', company: r.contact?.lead?.company ?? '', senderName: r.campaign?.senderName ?? '', calendlyUrl: r.campaign?.calendlyUrl ?? '', offer: r.campaign?.offer ?? '' }; const fill = (t: string) => t.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, name: string) => vars[name] ?? `{{${name}}}`); const subject = r.subject ?? fill(step?.subject ?? ''); const body = r.body ?? fill(step?.body ?? ''); return <li key={r.id}><strong>{r.contact?.email}</strong> &middot; Step {r.stepOrder ?? 1} &middot; {r.statusLabel ?? r.status}{r.scheduledAt ? <> &middot; Scheduled: {new Date(r.scheduledAt).toLocaleString()}</> : null}{r.sentAt ? <> &middot; Sent: {new Date(r.sentAt).toLocaleString()}</> : null}{r.approvedAt ? ' · approved' : ''}{r.error ? <> &middot; {userError(r.error)}</> : null}<details><summary>Review message</summary><p>{subject}</p><pre>{body}</pre>{!r.subject && !r.body && <p className="muted">Preview with this contact’s details. Final Calendly tracking is added when the email sends.</p>}</details>{r.reviewError && <p className="muted">{userError(r.reviewError)}</p>}{canWrite && r.status === 'QUEUED' && !r.approvedAt && r.reviewToken && <button disabled={busy} onClick={() => void mutate('outreach', 'PATCH', { id: r.id, reviewToken: r.reviewToken })}>Approve send</button>}</li>; })}</ul>
-        <h2>Replies</h2><p className="muted">Replies are classified automatically. Use the buttons when a person needs to qualify, suppress or dismiss one.</p>{replies.length > 25 && <p className="muted">Showing the latest 25 of {replies.length}.</p>}<ul className="recordList">{replies.slice(0, 25).map(r => <li key={r.id}><strong>{r.intent}</strong><p>{r.rawSnippet}</p><p>{r.recommendedAction}</p><ReplyAi replyId={r.id} />{canWrite && <div className="toolbar"><button type="button" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'qualify' })}>Mark positive</button><button type="button" className="secondary" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'suppress' })}>Suppress sender</button><button type="button" className="secondary" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'dismiss' })}>Dismiss</button></div>}</li>)}</ul></>}
+        <h2>Runs</h2><p className="muted">Discovery runs are queued and retried automatically by the worker; you do not need to keep this page open.</p><div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><thead><tr><th>Campaign</th><th>Run</th><th>Status</th><th>Discovered</th><th>Queued</th><th>Detail</th></tr></thead><tbody>{runPageData.slice.map(r => <tr key={r.id}><td>{r.campaign?.name ?? '—'}</td><td>{new Date(r.createdAt).toLocaleString()}</td><td>{r.status}{r.attempts > 0 && <> &middot; attempt {r.attempts}/3</>}</td><td>{r.prospectsFound}</td><td>{r.messagesQueued}</td><td>{r.errors?.code ? userError(r.errors.code) : r.status === 'QUEUED' ? `Queued${r.availableAt && new Date(r.availableAt) > new Date() ? ` · next attempt ${new Date(r.availableAt).toLocaleTimeString()}` : ''}` : r.status === 'RUNNING' ? 'Processing' : 'Completed'}</td></tr>)}</tbody></table></div>
+        <Pager page={runPageData.page} pages={runPageData.pages} total={runPageData.total} label="runs" onPage={setRunPage} />
+        <h2>Outreach queue</h2><ul className="recordList">{outreachPageData.slice.map(r => { const step = r.campaign?.sequenceSteps?.find((s: Row) => s.stepOrder === r.stepOrder); const vars: Record<string, string> = { firstName: String(r.contact?.fullName ?? 'there').split(/\s+/)[0] || 'there', company: r.contact?.lead?.company ?? '', senderName: r.campaign?.senderName ?? '', calendlyUrl: r.campaign?.calendlyUrl ?? '', offer: r.campaign?.offer ?? '' }; const fill = (t: string) => t.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, name: string) => vars[name] ?? `{{${name}}}`); const subject = r.subject ?? fill(step?.subject ?? ''); const body = r.body ?? fill(step?.body ?? ''); return <li key={r.id}><strong>{r.contact?.email}</strong> &middot; Step {r.stepOrder ?? 1} &middot; {r.statusLabel ?? r.status}{r.scheduledAt ? <> &middot; Scheduled: {new Date(r.scheduledAt).toLocaleString()}</> : null}{r.sentAt ? <> &middot; Sent: {new Date(r.sentAt).toLocaleString()}</> : null}{r.approvedAt ? ' · approved' : ''}{r.error ? <> &middot; {userError(r.error)}</> : null}<details><summary>Review message</summary><p>{subject}</p><pre>{body}</pre>{!r.subject && !r.body && <p className="muted">Preview with this contact’s details. Final Calendly tracking is added when the email sends.</p>}</details>{r.reviewError && <p className="muted">{userError(r.reviewError)}</p>}{canWrite && r.status === 'QUEUED' && !r.approvedAt && r.reviewToken && <button disabled={busy} onClick={() => void mutate('outreach', 'PATCH', { id: r.id, reviewToken: r.reviewToken })}>Approve send</button>}</li>; })}</ul>
+        <Pager page={outreachPageData.page} pages={outreachPageData.pages} total={outreachPageData.total} label="messages" onPage={setOutreachPage} />
+        <h2>Replies</h2><p className="muted">Replies are classified automatically. Use the buttons when a person needs to qualify, suppress or dismiss one.</p><ul className="recordList">{replyPageData.slice.map(r => <li key={r.id}><strong>{r.intent}</strong><p>{r.rawSnippet}</p><p>{r.recommendedAction}</p><ReplyAi replyId={r.id} />{canWrite && <div className="toolbar"><button type="button" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'qualify' })}>Mark positive</button><button type="button" className="secondary" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'suppress' })}>Suppress sender</button><button type="button" className="secondary" disabled={busy} onClick={() => void mutate('replies', 'PATCH', { id: r.id, action: 'dismiss' })}>Dismiss</button></div>}</li>)}</ul>
+        <Pager page={replyPageData.page} pages={replyPageData.pages} total={replyPageData.total} label="replies" onPage={setReplyPage} /></>}
       {section !== 'settings' && section !== 'overview' && rows.length === 0 && <p className="muted">No records yet.</p>}
     </>
   </>;

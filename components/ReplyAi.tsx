@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { api } from './api';
+import { showToast } from './Toaster';
 
 export default function ReplyAi({ replyId }: { replyId: string }) {
   const [available, setAvailable] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [insight, setInsight] = useState<any>(null);
   useEffect(() => { api('ai/status').then(s => setAvailable(!!s.enabled && s.canUse && s.features.includes('reply_assist'))).catch(() => setAvailable(false)); }, []);
   if (!available) return null;
-  async function run() { setBusy(true); setError(''); try { setInsight((await api('ai/reply', 'POST', { replyId })).insight); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
+  async function run() { setBusy(true); setError(''); try { setInsight((await api('ai/reply', 'POST', { replyId })).insight); } catch (e) { showToast((e as Error).message, 'error'); } finally { setBusy(false); } }
   return <div className="aiReply">
     <button type="button" disabled={busy} onClick={() => void run()}>{busy ? 'Analysing…' : 'Analyse with AI'}</button>
     {error && <p role="alert" className="error">{error}</p>}
