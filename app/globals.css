@@ -36,7 +36,8 @@ code{overflow-wrap:anywhere;background:var(--surface-2);padding:2px 5px;border-r
 .appShell .appShell{display:contents}
 .appShell .appShell>.side{display:none!important}
 .appShell .appShell>.main{padding:0;max-width:none}
-.side{padding:24px 18px;background:var(--surface);border-right:1px solid var(--line)}
+.side{padding:24px 18px;background:var(--surface);border-right:1px solid var(--line);position:sticky;top:0;height:100vh;height:100dvh;overflow-y:auto;display:flex;flex-direction:column}
+.sideActions{display:grid;gap:8px;margin-top:auto}
 .side nav{display:grid;gap:4px;margin:28px 0;align-content:start}
 .side nav a{padding:10px 12px;color:var(--text);text-decoration:none;border-radius:8px;min-height:44px;display:flex;align-items:center}
 .side nav a:hover,.side nav a[aria-current=page]{background:var(--accent-soft)}
