@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { checkAiUrl, chat, extractJson, MAX_RESPONSE_BYTES } from '../lib/ai/client.ts';
+import { checkAiUrl, chat, extractJson, explainAiSetup, MAX_RESPONSE_BYTES } from '../lib/ai/client.ts';
 import { cleanText, suggestCampaign, analyseReply, testConnection } from '../lib/ai/features.ts';
 import { userError } from '../lib/userErrors.ts';
 
@@ -111,6 +111,13 @@ test('a 200 with no text distinguishes a spent token budget from an empty answer
   await t.test('a genuinely empty answer is still reported as empty', async () => {
     await assert.rejects(chat(cfg, [], { fetcher: async () => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: {} }] })) }), /ai_empty_response/);
   });
+  // A reasoning model can also spend the budget and still return text: the visible answer is cut
+  // off mid-sentence. That body is non-empty, so an emptiness check alone let it through and
+  // extractJson reported the truncated fragment as ai_bad_json instead of the real cause.
+  await t.test('finish_reason length with partial content names the token budget, not bad JSON', async () => {
+    const clipped = { choices: [{ finish_reason: 'length', message: { content: '{"intent": "POSITIVE", "summary": "asked about pri' } }], usage: { completion_tokens: 700, prompt_tokens: 49, total_tokens: 900 } };
+    await assert.rejects(chat(cfg, [], { fetcher: async () => new Response(JSON.stringify(clipped)) }), /ai_output_budget_exhausted/);
+  });
   await t.test('the Test connection button no longer asks a reasoning model for 20 tokens', async () => {
     let seen;
     const fetcher = async (url, init) => { seen = JSON.parse(init.body); return new Response(JSON.stringify(reply('ready'))); };
@@ -119,12 +126,30 @@ test('a 200 with no text distinguishes a spent token budget from an empty answer
   });
 });
 
+test('the key check knows each provider\'s format instead of only OpenAI\'s', () => {
+  const gemini = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', 'AIza' + 'x'.repeat(35)), null);
+  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', undefined), 'ai_key_required');
+  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', 'sk-proj-' + 'x'.repeat(40)), 'ai_google_key_invalid');
+  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', 'AIzaShort'), 'ai_google_key_invalid');
+  assert.equal(explainAiSetup('https://api.openai.com/v1', 'gpt-4o', 'sk-' + 'x'.repeat(40)), null);
+  assert.equal(explainAiSetup('https://api.openai.com/v1', 'gpt-4o', 'AIza' + 'x'.repeat(35)), 'ai_openai_key_invalid');
+  // A host we have no format for stays the provider's business to judge.
+  assert.equal(explainAiSetup('http://localhost:11434/v1', 'llama3.1', undefined), null);
+  // A model field holding an email is never a model name, whoever the provider is.
+  assert.equal(explainAiSetup(gemini, 'ops@example.com', 'AIza' + 'x'.repeat(35)), 'ai_model_is_email');
+});
+
 test('AI failures explain themselves instead of reading like a broken connection', async () => {
   assert.match(userError('ai_provider_error_503'), /temporarily unavailable/i);
   assert.match(userError('ai_provider_error_429'), /rate limit/i);
   assert.match(userError('ai_provider_error_401'), /rejected the API key/i);
   assert.match(userError('ai_provider_error_404'), /does not recognise that model/i);
   assert.match(userError('ai_output_budget_exhausted'), /token budget/i);
+  assert.match(userError('ai_google_key_invalid'), /AIza/);
+  assert.match(userError('ai_openai_key_invalid'), /sk-/);
+  // Gemini answers a bad key with 400, not 401, so that status needs its own sentence.
+  assert.match(userError('ai_provider_error_400'), /AI Studio/);
   assert.match(userError('ai_empty_response'), /no text/i);
   assert.doesNotMatch(userError('ai_provider_error_503'), /_/, 'no raw underscore codes leak to the operator');
 });
@@ -171,6 +196,25 @@ test('suggestCampaign: valid output becomes a validated ICP and sequence; malfor
     await assert.rejects(suggestCampaign(cfg, { description: 'x'.repeat(30) }, fetcherFor(() => reply({ ...goodCampaign, icp: { ...goodCampaign.icp, industries: [] } }))), /ai_incomplete_icp/);
     await assert.rejects(suggestCampaign(cfg, { description: 'x'.repeat(30) }, fetcherFor(() => reply({ nope: 1 }))), /ai_bad_shape/);
     await assert.rejects(suggestCampaign(cfg, { description: 'x'.repeat(30) }, fetcherFor(() => reply({ ...goodCampaign, steps: [{ waitBusinessDays: 0, subject: 'https://only-a-link.example', body: 'ok' }] }))), /ai_empty_email/);
+  });
+
+  // Gemini intermittently answers with an empty buyingSignals list, which icpInput refuses. One
+  // re-ask recovers instead of surfacing a 502 to the operator.
+  await t.test('an empty required list is re-asked once instead of failing the request', async () => {
+    let n = 0;
+    const flaky = fetcherFor(() => (++n === 1
+      ? reply({ ...goodCampaign, icp: { ...goodCampaign.icp, buyingSignals: [] } })
+      : reply(goodCampaign)));
+    const s = await suggestCampaign(cfg, { description: 'x'.repeat(30) }, flaky);
+    assert.equal(n, 2, 'should have asked exactly twice');
+    assert.ok(s.icp.buyingSignals.length > 0);
+  });
+
+  await t.test('a model that never fills the list still fails, and does not loop', async () => {
+    let n = 0;
+    const always = fetcherFor(() => { n++; return reply({ ...goodCampaign, icp: { ...goodCampaign.icp, buyerTitles: [] } }); });
+    await assert.rejects(suggestCampaign(cfg, { description: 'x'.repeat(30) }, always), /ai_incomplete_icp/);
+    assert.equal(n, 2, 'retries are bounded');
   });
 });
 

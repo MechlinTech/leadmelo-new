@@ -25,7 +25,9 @@ const MESSAGES: Record<string, string> = {
   invalid_mfa_code: 'That code was not accepted. Codes can be used once; wait for the next code and try again.',
   ai_url_required: 'Enter an AI base URL before enabling AI assist.',
   ai_empty_response: 'The AI provider answered but returned no text. This usually means the model needed a larger output budget, or the model name is wrong.',
-  ai_output_budget_exhausted: 'The AI model used its whole token budget reasoning and returned no answer. This is a reasoning model such as Gemini or an o-series model; it needs a larger max output setting.',
+  ai_output_budget_exhausted: 'The AI model used its whole token budget and the answer was cut off. This is a reasoning model such as Gemini or an o-series model, which spends part of the budget reasoning before it writes anything; it needs a larger max output setting.',
+  ai_google_key_invalid: 'That does not look like a Google AI Studio key. Gemini keys start with AIza. Paste the key from Google AI Studio, not the project ID.',
+  ai_openai_key_invalid: 'That does not look like an OpenAI key. OpenAI keys start with sk-. Paste the key from the OpenAI platform, not the organisation ID.',
   ai_unreachable: 'The AI provider could not be reached. Check the base URL and that the server can reach it.',
   ai_timeout: 'The AI provider did not answer in time. Try again, or use a faster model.',
   ai_invalid_response: 'The AI provider returned a response that could not be read. Check the base URL points at an OpenAI-compatible endpoint.',
@@ -113,6 +115,9 @@ export function userError(code: unknown): string {
     if (status === '503' || status === '500' || status === '502') return 'The AI provider is temporarily unavailable (HTTP ' + status + '), usually high demand on their side. Wait a moment and try again; nothing was billed.';
     if (status === '401' || status === '403') return 'The AI provider rejected the API key (HTTP ' + status + '). Check the key is active and has access to the configured model.';
     if (status === '404') return 'The AI provider does not recognise that model (HTTP 404). Check the model name, for example gemini-flash-latest.';
+    // Google answers a bad key with 400 "Please pass a valid API key" rather than 401, so this is
+    // where a wrong Gemini key actually lands.
+    if (status === '400') return 'The AI provider rejected the request as invalid (HTTP 400). With Gemini this usually means the API key was not accepted or is not enabled for the configured model; check the key in Google AI Studio.';
     return 'The AI provider returned HTTP ' + status + '. Check the provider dashboard for details.';
   }
   // Codes with a curated sentence always win over the underscore-stripped fallback.
