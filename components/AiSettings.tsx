@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { api } from './api';
+import { showToast } from './Toaster';
 
 const PRESETS = [
   { id: 'openai', label: 'OpenAI', url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
@@ -9,22 +10,22 @@ const PRESETS = [
 ];
 
 export default function AiSettings() {
-  const [s, setS] = useState<any>(null), [busy, setBusy] = useState(false), [status, setStatus] = useState(''), [error, setError] = useState('');
+  const [s, setS] = useState<any>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [enabled, setEnabled] = useState(false), [url, setUrl] = useState(''), [model, setModel] = useState(''), [key, setKey] = useState(''), [features, setFeatures] = useState<string[]>([]);
   useEffect(() => { api('settings').then(v => { setS(v); setEnabled(!!v.aiEnabled); setUrl(v.aiBaseUrl ?? ''); setModel(v.aiModel ?? ''); setFeatures(v.aiFeatures ?? []); }).catch(e => setError((e as Error).message)); }, []);
   if (!s) return error ? <p role="alert" className="error">{error}</p> : null;
   const toggle = (f: string) => setFeatures(list => list.includes(f) ? list.filter(x => x !== f) : [...list, f]);
   async function save() {
-    setBusy(true); setError(''); setStatus('');
+    setBusy(true); setError('');
     try {
       await api('settings', 'PUT', { automationEnabled: s.automationEnabled, dailySendCap: s.dailySendCap, weeklyProspectCap: s.weeklyProspectCap, postalAddress: s.postalAddress, aiEnabled: enabled, aiBaseUrl: url || null, aiModel: model || null, aiFeatures: features, ...(key ? { aiKey: key } : {}) });
-      setKey(''); setStatus('AI settings saved.'); setS({ ...s, aiKeyConfigured: s.aiKeyConfigured || !!key, aiEnabled: enabled, aiBaseUrl: url, aiModel: model });
+      setKey(''); showToast('AI settings saved.'); setS({ ...s, aiKeyConfigured: s.aiKeyConfigured || !!key, aiEnabled: enabled, aiBaseUrl: url, aiModel: model });
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
   async function test() {
-    setBusy(true); setError(''); setStatus('Contacting the model. A local model can take a minute on its first call…');
-    try { const r = await api('ai/test', 'POST', {}); setStatus(`Connected. The model answered: "${r.sample}".`); }
-    catch (e) { setStatus(''); setError(`Connection failed: ${(e as Error).message}`); } finally { setBusy(false); }
+    setBusy(true); setError('');
+    try { const r = await api('ai/test', 'POST', {}); showToast(`Connected. The model answered: "${r.sample}".`); }
+    catch (e) { setError(`Connection failed: ${(e as Error).message}`); } finally { setBusy(false); }
   }
   return <section aria-labelledby="ai-title">
     <h2 id="ai-title">AI assist (optional)</h2>
@@ -42,8 +43,8 @@ export default function AiSettings() {
         <label><input type="checkbox" checked={features.includes('reply_assist')} onChange={() => toggle('reply_assist')}/> Reply assist: summarise replies and draft a response</label>
       </fieldset>
       <p className="muted">Plain http or private addresses (such as a local Ollama) are accepted only if the server operator lists the host in <code>AI_ALLOWED_HOSTS</code>. Public services must use https.</p>
-      {error && <p role="alert" className="error">{error}</p>}{status && <p role="status" className="muted">{status}</p>}
-      <div className="toolbar"><button type="button" disabled={busy} onClick={() => void save()}>Save AI settings</button><button type="button" disabled={busy || !s.aiBaseUrl} onClick={() => void test()}>Test connection</button></div>
+      {error && <p role="alert" className="error" style={{ marginBottom: 16 }}>{error}</p>}
+      <div className="toolbar"><button type="button" disabled={busy} onClick={() => void save()}>Save AI settings</button><button type="button" disabled={busy || !url} onClick={() => void test()}>Test connection</button></div>
     </div>
   </section>;
 }

@@ -37,7 +37,7 @@ code{overflow-wrap:anywhere;background:var(--surface-2);padding:2px 5px;border-r
 .appShell .appShell>.side{display:none!important}
 .appShell .appShell>.main{padding:0;max-width:none}
 .side{padding:24px 18px;background:var(--surface);border-right:1px solid var(--line)}
-.side nav{display:grid;gap:4px;margin:28px 0}
+.side nav{display:grid;gap:4px;margin:28px 0;align-content:start}
 .side nav a{padding:10px 12px;color:var(--text);text-decoration:none;border-radius:8px;min-height:44px;display:flex;align-items:center}
 .side nav a:hover,.side nav a[aria-current=page]{background:var(--accent-soft)}
 .brand{display:flex;align-items:center;gap:8px;font-size:21px;font-weight:750;color:var(--text);text-decoration:none}
@@ -191,3 +191,6 @@ details summary{cursor:pointer;min-height:32px}
   85% { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
   100% { transform: translate(-50%, -150%); opacity: 0; pointer-events: none; }
 }
+
+.toast-slide { animation: toastSlide 4s ease-in-out forwards; }
+@keyframes toastSlide { 0% { transform: translateY(-20px); opacity: 0; } 10% { transform: translateY(0); opacity: 1; } 85% { transform: translateY(0); opacity: 1; pointer-events: auto; } 100% { transform: translateY(-20px); opacity: 0; pointer-events: none; } }
