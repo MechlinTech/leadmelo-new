@@ -1,0 +1,51 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "Ak/Bug-Fix",
+    "fix-ai-features",
+    "fix/comprehensive-ui-ux",
+    "fix/lm-06-experiment-name-overflow",
+    "fix/refresh-button",
+    "fix/security",
+    "fix/sequencing-and-state-saving",
+    "fix/sidebar",
+    "fix/sidebar-dual-css-fix",
+    "fix/sidebar-homepage-fix-and-buttons-fix",
+    "fix/sidebar-ui",
+    "fix/ui-fixes",
+    "main",
+    "production"
+  ],
+  "parent": {
+    "Ak/Bug-Fix": "main",
+    "fix-ai-features": "main",
+    "fix/comprehensive-ui-ux": "main",
+    "fix/lm-06-experiment-name-overflow": "main",
+    "fix/refresh-button": "main",
+    "fix/security": "main",
+    "fix/sequencing-and-state-saving": "main",
+    "fix/sidebar": "main",
+    "fix/sidebar-dual-css-fix": "fix/sidebar",
+    "fix/sidebar-homepage-fix-and-buttons-fix": "fix/sidebar",
+    "fix/sidebar-ui": "fix/sidebar",
+    "fix/ui-fixes": "main",
+    "main": null,
+    "production": "main"
+  },
+  "order": [
+    "main",
+    "Ak/Bug-Fix",
+    "fix-ai-features",
+    "fix/comprehensive-ui-ux",
+    "fix/lm-06-experiment-name-overflow",
+    "fix/refresh-button",
+    "fix/security",
+    "fix/sequencing-and-state-saving",
+    "fix/sidebar",
+    "fix/ui-fixes",
+    "production",
+    "fix/sidebar-dual-css-fix",
+    "fix/sidebar-homepage-fix-and-buttons-fix",
+    "fix/sidebar-ui"
+  ]
+}
