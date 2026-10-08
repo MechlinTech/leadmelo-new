@@ -11,14 +11,12 @@ import ThemeBoot from '../../components/ThemeBoot';
 
 export const dynamic = 'force-dynamic';
 
-const chromeGate = cache(() => ({ taken: false }));
+
 
 export default async function Layout({ children }: { children: React.ReactNode }) {
   const user = await sessionUser((await cookies()).get(sessionCookie)?.value);
   if (!user?.tenantId) return children;
-  const gate = chromeGate();
-  if (gate.taken) return children;
-  gate.taken = true;
+  
   const canWrite = ['TENANT_ADMIN', 'SUPER_ADMIN', 'MANAGER'].includes(user.role);
   return <AppRoleProvider canWrite={canWrite} role={user.role}><ThemeBoot /><div className="appShell">
     <aside className="side">

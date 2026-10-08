@@ -221,11 +221,19 @@ export default function Workspace({ section }: { section: Section }) {
   const leadPageData = pageSlice(visibleLeads, leadPage, 10);
   const meetingPageData = pageSlice(rows, meetingPage, 10);
   const icpPageData = pageSlice(rows, icpPage, 10);
-  const sortedRuns = useMemo(() => section === 'automation-runs' ? [...rows].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : [], [rows, section]);
+  const sortedRuns = useMemo(() => section === 'automation-runs' ? [...rows].sort((a, b) => new Date(b.availableAt || b.createdAt).getTime() - new Date(a.availableAt || a.createdAt).getTime()) : [], [rows, section]);
   const runPageData = pageSlice(sortedRuns, runPage, 10);
-  const sortedOutreach = useMemo(() => [...outreach].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [outreach]);
+  const sortedOutreach = useMemo(() => [...outreach].sort((a, b) => {
+    const tB = Math.max(new Date(b.sentAt || 0).getTime(), new Date(b.approvedAt || 0).getTime(), new Date(b.scheduledAt || 0).getTime(), new Date(b.createdAt || 0).getTime());
+    const tA = Math.max(new Date(a.sentAt || 0).getTime(), new Date(a.approvedAt || 0).getTime(), new Date(a.scheduledAt || 0).getTime(), new Date(a.createdAt || 0).getTime());
+    return tB - tA;
+  }), [outreach]);
   const outreachPageData = pageSlice(sortedOutreach, outreachPage, 10);
-  const sortedReplies = useMemo(() => [...replies].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [replies]);
+  const sortedReplies = useMemo(() => [...replies].sort((a, b) => {
+    const tB = Math.max(new Date(b.bookedAt || 0).getTime(), new Date(b.createdAt || 0).getTime());
+    const tA = Math.max(new Date(a.bookedAt || 0).getTime(), new Date(a.createdAt || 0).getTime());
+    return tB - tA;
+  }), [replies]);
   const replyPageData = pageSlice(sortedReplies, replyPage, 10);
   // "All meetings" is the unfiltered view; any narrower date window is a filtered result.
   const meetingsFiltered = meetingHours > 0;
@@ -291,9 +299,9 @@ export default function Workspace({ section }: { section: Section }) {
                   </td>
                   <td style={{ padding: '16px 12px', verticalAlign: 'middle' }}>
                     {canWrite ? 
-                      <select aria-label="Record meeting outcome" style={{ width: '100%', minWidth: '130px', padding: '6px 8px', fontSize: '14px' }} defaultValue="" disabled={busy || r.status === 'CANCELED'} onChange={e => { if (e.target.value) void mutate('appointments', 'PATCH', { id: r.id, status: e.target.value, outcomeReason: 'Recorded by meeting owner' }); }}>
+                      <select aria-label="Record meeting outcome" style={{ width: '100%', minWidth: '130px', padding: '6px 8px', fontSize: '14px' }} value={r.outcome || ""} disabled={busy || r.status === 'CANCELED'} onChange={e => { if (e.target.value) void mutate('appointments', 'PATCH', { id: r.id, outcome: e.target.value, outcomeReason: 'Recorded by meeting owner' }); }}>
                         <option value="">Record outcome</option>
-                        {['COMPLETED', 'NO_SHOW', 'DISQUALIFIED', 'WON', 'LOST'].map(v => <option key={v}>{v.replaceAll('_', ' ')}</option>)}
+                        {['COMPLETED', 'NO_SHOW', 'DISQUALIFIED', 'WON', 'LOST'].map(v => <option key={v} value={v}>{v.replaceAll('_', ' ')}</option>)}
                       </select> 
                     : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
