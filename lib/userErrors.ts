@@ -24,6 +24,12 @@ const MESSAGES: Record<string, string> = {
   mfa_required: 'Enter the 6-digit code from your authenticator app, or a recovery code.',
   invalid_mfa_code: 'That code was not accepted. Codes can be used once; wait for the next code and try again.',
   ai_url_required: 'Enter an AI base URL before enabling AI assist.',
+  ai_empty_response: 'The AI provider answered but returned no text. This usually means the model needed a larger output budget, or the model name is wrong.',
+  ai_output_budget_exhausted: 'The AI model used its whole token budget reasoning and returned no answer. This is a reasoning model such as Gemini or an o-series model; it needs a larger max output setting.',
+  ai_unreachable: 'The AI provider could not be reached. Check the base URL and that the server can reach it.',
+  ai_timeout: 'The AI provider did not answer in time. Try again, or use a faster model.',
+  ai_invalid_response: 'The AI provider returned a response that could not be read. Check the base URL points at an OpenAI-compatible endpoint.',
+  ai_response_too_large: 'The AI provider returned more data than the limit allows.',
   waiting_for_send_gate: 'This message is waiting on a send check (approval, send hours, mailbox sync, or sender health).',
   outside_send_window: 'Approved, but outside this campaign’s send hours in its timezone. It will send when the window opens.',
   awaiting_approval: 'This message is waiting for Approve send on the Automation page.',
@@ -97,6 +103,17 @@ export function userError(code: unknown): string {
   if (raw.startsWith('m365_draft_rejected_')) {
     const status = raw.slice('m365_draft_rejected_'.length);
     return `Microsoft 365 refused this email (HTTP ${status}), so nothing was sent. Check the sender mailbox permissions and the campaign sender address, then queue the message again.`;
+  }
+  // An AI provider error is a status from someone else's API. Without a curated sentence the
+  // fallback turned "ai_provider_error_503" into "ai provider error 503", which reads like a
+  // broken connection rather than what it is.
+  if (raw.startsWith('ai_provider_error_')) {
+    const status = raw.slice('ai_provider_error_'.length);
+    if (status === '429') return 'The AI provider is rate limiting this key (HTTP 429). Wait a moment and try again; if it persists, check the quota or billing on the provider account.';
+    if (status === '503' || status === '500' || status === '502') return 'The AI provider is temporarily unavailable (HTTP ' + status + '), usually high demand on their side. Wait a moment and try again; nothing was billed.';
+    if (status === '401' || status === '403') return 'The AI provider rejected the API key (HTTP ' + status + '). Check the key is active and has access to the configured model.';
+    if (status === '404') return 'The AI provider does not recognise that model (HTTP 404). Check the model name, for example gemini-flash-latest.';
+    return 'The AI provider returned HTTP ' + status + '. Check the provider dashboard for details.';
   }
   // Codes with a curated sentence always win over the underscore-stripped fallback.
   if (MESSAGES[raw]) return MESSAGES[raw];

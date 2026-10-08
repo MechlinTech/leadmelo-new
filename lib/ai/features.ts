@@ -139,6 +139,10 @@ export async function analyseReply(cfg: AiConfig, input: { text: string; offer?:
 }
 
 export async function testConnection(cfg: AiConfig, fetcher?: Fetcher): Promise<{ ok: true; sample: string }> {
-  const text = await chat(cfg, [{ role: 'user', content: 'Reply with the single word: ready' }], { maxTokens: 20, timeoutMs: 60_000, fetcher });
+  // A reasoning model (Gemini "thinking", o-series) spends the first tokens on internal
+  // reasoning. With maxTokens 20 it returned HTTP 200, finish_reason "length",
+  // completion_tokens 0 and no content at all, so chat() reported ai_empty_response and the
+  // Test button failed against a perfectly healthy provider. Give the budget room to think.
+  const text = await chat(cfg, [{ role: 'user', content: 'Reply with the single word: ready' }], { maxTokens: 800, timeoutMs: 60_000, fetcher });
   return { ok: true, sample: text.slice(0, 80) };
 }

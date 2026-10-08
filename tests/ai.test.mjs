@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { checkAiUrl, chat, extractJson, MAX_RESPONSE_BYTES } from '../lib/ai/client.ts';
-import { cleanText, suggestCampaign, analyseReply } from '../lib/ai/features.ts';
+import { cleanText, suggestCampaign, analyseReply, testConnection } from '../lib/ai/features.ts';
+import { userError } from '../lib/userErrors.ts';
 
 const reply = content => ({ choices: [{ message: { content: typeof content === 'string' ? content : JSON.stringify(content) } }] });
 const fetcherFor = handler => async (url, init) => { const out = await handler(url, JSON.parse(init.body), init); return new Response(JSON.stringify(out), { status: 200 }); };
@@ -30,7 +31,7 @@ test('chat(): sends the key, refuses redirects and oversize replies, times out, 
     assert.equal(called, false);
   });
   await t.test('non-200, garbage, empty and oversize responses become 502s', async () => {
-    await assert.rejects(chat(cfg, [], { fetcher: async () => new Response('x', { status: 500 }) }), /ai_provider_error_500/);
+    await assert.rejects(chat(cfg, [], { fetcher: async () => new Response('x', { status: 500 }), retryBaseMs: 1 }), /ai_provider_error_500/);
     await assert.rejects(chat(cfg, [], { fetcher: async () => new Response('not json') }), /ai_invalid_response/);
     await assert.rejects(chat(cfg, [], { fetcher: async () => new Response(JSON.stringify({ choices: [] })) }), /ai_empty_response/);
     await assert.rejects(chat(cfg, [], { fetcher: async () => new Response('x'.repeat(MAX_RESPONSE_BYTES + 10)) }), /ai_response_too_large/);
@@ -38,8 +39,94 @@ test('chat(): sends the key, refuses redirects and oversize replies, times out, 
   await t.test('a hung model times out instead of hanging the request', async () => {
     const hang = (url, init) => new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
     await assert.rejects(chat(cfg, [], { fetcher: hang, timeoutMs: 30 }), /ai_timeout/);
-    await assert.rejects(chat(cfg, [], { fetcher: async () => { throw new TypeError('fetch failed'); } }), /ai_unreachable/);
+    await assert.rejects(chat(cfg, [], { fetcher: async () => { throw new TypeError('fetch failed'); }, retryBaseMs: 1 }), /ai_unreachable/);
   });
+});
+
+// A provider under load answers 503 UNAVAILABLE ("high demand... usually temporary") or 429.
+// Treating either as fatal made the AI look broken for reasons outside the operator's control.
+test('chat(): retries temporary provider conditions, and gives up on permanent ones', async t => {
+  const calls = statuses => { let n = 0; return async () => new Response('x', { status: statuses[Math.min(n++, statuses.length - 1)] }); };
+
+  for (const status of [429, 500, 502, 503, 504, 408]) {
+    await t.test(`a ${status} is retried and can still succeed`, async () => {
+      let n = 0;
+      const fetcher = async () => (++n <= 2 ? new Response('busy', { status }) : new Response(JSON.stringify(reply('recovered'))));
+      assert.equal(await chat(cfg, [{ role: 'user', content: 'hi' }], { fetcher, retryBaseMs: 1 }), 'recovered');
+      assert.equal(n, 3, 'two failures then a success');
+    });
+  }
+
+  await t.test('retries are bounded, so a permanent outage fails instead of looping', async () => {
+    let n = 0;
+    const fetcher = async () => { n++; return new Response('busy', { status: 503 }); };
+    await assert.rejects(chat(cfg, [], { fetcher, retryBaseMs: 1 }), /ai_provider_error_503/);
+    assert.equal(n, 3, 'exactly three attempts, no more');
+    n = 0;
+    await assert.rejects(chat(cfg, [], { fetcher, retryBaseMs: 1, maxAttempts: 5 }), /ai_provider_error_503/);
+    assert.equal(n, 5, 'maxAttempts is honoured');
+  });
+
+  for (const status of [400, 401, 403, 404, 422]) {
+    await t.test(`a ${status} is NOT retried, because retrying cannot help`, async () => {
+      let n = 0;
+      const fetcher = async () => { n++; return new Response('no', { status }); };
+      await assert.rejects(chat(cfg, [], { fetcher, retryBaseMs: 1 }), new RegExp(`ai_provider_error_${status}`));
+      assert.equal(n, 1, 'a configuration or request error is reported immediately');
+    });
+  }
+
+  await t.test('a transport failure is retried once before being reported unreachable', async () => {
+    let n = 0;
+    const fetcher = async () => { n++; if (n === 1) throw new TypeError('fetch failed'); return new Response(JSON.stringify(reply('ok'))); };
+    assert.equal(await chat(cfg, [], { fetcher, retryBaseMs: 1 }), 'ok');
+  });
+
+  await t.test('Retry-After is honoured instead of the local backoff', async () => {
+    let n = 0;
+    const started = Date.now();
+    const fetcher = async () => (++n === 1
+      ? new Response('slow down', { status: 429, headers: { 'retry-after': '0' } })
+      : new Response(JSON.stringify(reply('ok'))));
+    assert.equal(await chat(cfg, [], { fetcher, retryBaseMs: 50_000 }), 'ok');
+    assert.ok(Date.now() - started < 5_000, 'Retry-After: 0 overrides a 50s local backoff');
+  });
+
+  await t.test('retries cannot outlive the caller deadline', async () => {
+    let n = 0;
+    const fetcher = async () => { n++; return new Response('busy', { status: 503 }); };
+    await assert.rejects(chat(cfg, [], { fetcher, retryBaseMs: 200, timeoutMs: 250 }), /ai_provider_error_503/);
+    assert.ok(n < 3, `stopped early rather than sleeping past the deadline (attempts=${n})`);
+  });
+});
+
+// A reasoning model can answer HTTP 200, spend the whole max_tokens budget thinking, and return
+// no text at all. Gemini returned finish_reason "length" with completion_tokens 0, which the old
+// code reported as a failed connection.
+test('a 200 with no text distinguishes a spent token budget from an empty answer', async t => {
+  await t.test('finish_reason length with no content names the token budget', async () => {
+    const spent = { choices: [{ finish_reason: 'length', message: { role: 'assistant' } }], usage: { completion_tokens: 0, prompt_tokens: 8, total_tokens: 25 } };
+    await assert.rejects(chat(cfg, [], { fetcher: async () => new Response(JSON.stringify(spent)) }), /ai_output_budget_exhausted/);
+  });
+  await t.test('a genuinely empty answer is still reported as empty', async () => {
+    await assert.rejects(chat(cfg, [], { fetcher: async () => new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: {} }] })) }), /ai_empty_response/);
+  });
+  await t.test('the Test connection button no longer asks a reasoning model for 20 tokens', async () => {
+    let seen;
+    const fetcher = async (url, init) => { seen = JSON.parse(init.body); return new Response(JSON.stringify(reply('ready'))); };
+    await testConnection({ baseUrl: 'https://llm.example.com/v1', model: 'gemini-3.8-flash', apiKey: 'k' }, fetcher);
+    assert.ok(seen.max_tokens >= 500, `expected a budget a thinking model can use, got ${seen.max_tokens}`);
+  });
+});
+
+test('AI failures explain themselves instead of reading like a broken connection', async () => {
+  assert.match(userError('ai_provider_error_503'), /temporarily unavailable/i);
+  assert.match(userError('ai_provider_error_429'), /rate limit/i);
+  assert.match(userError('ai_provider_error_401'), /rejected the API key/i);
+  assert.match(userError('ai_provider_error_404'), /does not recognise that model/i);
+  assert.match(userError('ai_output_budget_exhausted'), /token budget/i);
+  assert.match(userError('ai_empty_response'), /no text/i);
+  assert.doesNotMatch(userError('ai_provider_error_503'), /_/, 'no raw underscore codes leak to the operator');
 });
 
 test('extractJson tolerates fences and prose, and rejects everything else', () => {

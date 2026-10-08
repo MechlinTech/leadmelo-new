@@ -45,32 +45,81 @@ export function explainAiSetup(baseUrl: string, model: string, apiKey?: string):
 
 export const MAX_RESPONSE_BYTES = 200_000;
 
-export async function chat(cfg: AiConfig, messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number; timeoutMs?: number; fetcher?: typeof fetch } = {}): Promise<string> {
+// Statuses worth another attempt. Providers return these for temporary conditions only:
+// 429 throttling/quota, 5xx capacity and timeouts. Everything else (401/403/404/422) is a
+// configuration or request problem that will fail identically on every retry.
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function retryAfterMs(res: Response) {
+  const raw = res.headers?.get?.('retry-after');
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 10_000);
+  const when = Date.parse(raw);
+  return Number.isFinite(when) ? Math.min(Math.max(when - Date.now(), 0), 10_000) : null;
+}
+
+export async function chat(cfg: AiConfig, messages: ChatMessage[], opts: { json?: boolean; maxTokens?: number; timeoutMs?: number; fetcher?: typeof fetch; maxAttempts?: number; retryBaseMs?: number } = {}): Promise<string> {
   const bad = checkAiUrl(cfg.baseUrl);
   if (bad) throw new HttpError(400, `ai_url_rejected: ${bad}`);
   const f = opts.fetcher ?? fetch;
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 90_000);
+  // One deadline covers every attempt, so retries cannot extend the caller's timeout.
+  const deadline = opts.timeoutMs ?? 90_000;
+  const timer = setTimeout(() => ctl.abort(), deadline);
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? 3);
+  const base = opts.retryBaseMs ?? 500;
+  const startedAt = Date.now();
   try {
-    const res = await f(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST', redirect: 'error', signal: ctl.signal,
-      headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}) },
-      body: JSON.stringify({ model: cfg.model, messages, stream: false, temperature: 0.4, max_tokens: opts.maxTokens ?? 900, ...(opts.json ? { response_format: { type: 'json_object' } } : {}) })
-    });
-    if (!res.ok) throw new HttpError(502, `ai_provider_error_${res.status}`);
-    const reader = res.body?.getReader();
-    if (!reader) throw new HttpError(502, 'ai_empty_response');
-    const parts: Uint8Array[] = []; let size = 0;
-    for (;;) { const { value, done } = await reader.read(); if (done) break; size += value.length; if (size > MAX_RESPONSE_BYTES) { await reader.cancel(); throw new HttpError(502, 'ai_response_too_large'); } parts.push(value); }
-    let payload: any;
-    try { payload = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { throw new HttpError(502, 'ai_invalid_response'); }
-    const text = payload?.choices?.[0]?.message?.content;
-    if (typeof text !== 'string' || !text.trim()) throw new HttpError(502, 'ai_empty_response');
-    return text;
-  } catch (e) {
-    if (e instanceof HttpError) throw e;
-    if ((e as Error).name === 'AbortError') throw new HttpError(504, 'ai_timeout');
-    throw new HttpError(502, 'ai_unreachable');
+    let lastError: HttpError | null = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await f(`${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST', redirect: 'error', signal: ctl.signal,
+          headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}) },
+          body: JSON.stringify({ model: cfg.model, messages, stream: false, temperature: 0.4, max_tokens: opts.maxTokens ?? 900, ...(opts.json ? { response_format: { type: 'json_object' } } : {}) })
+        });
+        if (!res.ok) {
+          const status = res.status;
+          if (RETRYABLE_STATUS.has(status) && attempt < maxAttempts) {
+            lastError = new HttpError(502, `ai_provider_error_${status}`);
+            const wait = retryAfterMs(res) ?? base * 2 ** (attempt - 1);
+            // Never sleep past the caller's deadline; just try again immediately instead.
+            if (Date.now() - startedAt + wait >= deadline) throw lastError;
+            await sleep(wait);
+            continue;
+          }
+          throw new HttpError(502, `ai_provider_error_${status}`);
+        }
+        const reader = res.body?.getReader();
+        if (!reader) throw new HttpError(502, 'ai_empty_response');
+        const parts: Uint8Array[] = []; let size = 0;
+        for (;;) { const { value, done } = await reader.read(); if (done) break; size += value.length; if (size > MAX_RESPONSE_BYTES) { await reader.cancel(); throw new HttpError(502, 'ai_response_too_large'); } parts.push(value); }
+        let payload: any;
+        try { payload = JSON.parse(Buffer.concat(parts).toString('utf8')); } catch { throw new HttpError(502, 'ai_invalid_response'); }
+        const text = payload?.choices?.[0]?.message?.content;
+        if (typeof text !== 'string' || !text.trim()) {
+          // A reasoning model can answer 200 with no text at all when max_tokens is spent on
+          // internal thinking (finish_reason "length", completion_tokens 0). That is a token
+          // budget problem, not a connection failure, and saying so saves a wild goose chase.
+          if (payload?.choices?.[0]?.finish_reason === 'length') throw new HttpError(502, 'ai_output_budget_exhausted');
+          throw new HttpError(502, 'ai_empty_response');
+        }
+        return text;
+      } catch (e) {
+        if (e instanceof HttpError) throw e;
+        if ((e as Error).name === 'AbortError') throw new HttpError(504, 'ai_timeout');
+        // A transport-level failure (reset, DNS, dropped socket) is worth one more try.
+        if (attempt < maxAttempts && Date.now() - startedAt + base * 2 ** (attempt - 1) < deadline) {
+          lastError = new HttpError(502, 'ai_unreachable');
+          await sleep(base * 2 ** (attempt - 1));
+          continue;
+        }
+        throw new HttpError(502, 'ai_unreachable');
+      }
+    }
+    throw lastError ?? new HttpError(502, 'ai_unreachable');
   } finally { clearTimeout(timer); }
 }
 
