@@ -84,9 +84,15 @@ test('persisted multi-tenant campaign-to-booking flow', async t => {
       assert.equal((await createCampaign(request('campaigns', 'POST', { ...inputCampaign, icpId: foreign.id }))).status, 404);
       const created = await createCampaign(request('campaigns', 'POST', inputCampaign));
       assert.equal(created.status, 201); campaign = await created.json();
-      assert.equal((await patchCampaign(request('campaigns', 'PATCH', { id: campaign.id, status: 'ACTIVE' }))).status, 409);
+      // Activation no longer requires a healthy sender, so a campaign can be set up while the sender
+      // recovers; the worker still refuses to send, which is what actually protects reputation.
+      const withoutHealth = await patchCampaign(request('campaigns', 'PATCH', { id: campaign.id, status: 'ACTIVE' }));
+      assert.equal(withoutHealth.status, 200, 'activation succeeds while sender health is missing');
+      assert.equal((await withoutHealth.json()).warning, 'sender_health_not_ready', 'and says mail is held back');
       await handleProviderEvent(tenant.id, { id: 'health', type: 'sender.health', occurredAt: new Date().toISOString(), senderEmail: campaign.senderEmail, status: 'HEALTHY', dailyCap: 25, bounceRate: 0, complaintRate: 0 });
-      assert.equal((await patchCampaign(request('campaigns', 'PATCH', { id: campaign.id, status: 'ACTIVE' }))).status, 200);
+      const healthy = await patchCampaign(request('campaigns', 'PATCH', { id: campaign.id, status: 'ACTIVE' }));
+      assert.equal(healthy.status, 200);
+      assert.equal((await healthy.json()).warning, undefined, 'no warning once the sender is healthy');
       const inline = await createCampaign(request('campaigns', 'POST', { ...inputCampaign, name: 'Inline ICP campaign', icpId: undefined, icp: { ...input, name: 'Inline campaign ICP' }, startImmediately: true }));
       assert.equal(inline.status, 201);
       const inlineCampaign = await inline.json();
