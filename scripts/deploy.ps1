@@ -49,8 +49,31 @@ function Invoke-Compose([string[]]$ComposeArgs) {
   }
 }
 
+# Print the container's own output. Without this a failing migrate is just an exit code.
+function Show-Logs([string[]]$ComposeArgs) {
+  $pref = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & docker @compose @ComposeArgs 2>&1 | ForEach-Object { Write-Host $_ } } finally { $ErrorActionPreference = $pref }
+}
+
 # Leave the existing database volume running. Recreate only the app containers so the new image replaces what is listening.
 Invoke-Compose @('up', '-d', '--build', '--no-recreate', 'postgres')
+
+# Wait for postgres to accept connections. `--no-deps` below skips compose's own wait, so without this a
+# freshly started database races the migration and migrate dies on a refused connection.
+$pgDeadline = [datetimeoffset]::UtcNow.AddMinutes(5)
+do {
+  $pgHealth = docker inspect "${project}-postgres-1" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}'
+  if ($LASTEXITCODE -ne 0) { throw "could not inspect ${project}-postgres-1" }
+  if ($pgHealth -eq 'healthy') { break }
+  if ($pgHealth -eq 'unhealthy') {
+    Show-Logs @('logs', '--tail', '100', 'postgres')
+    throw "postgres is unhealthy"
+  }
+  Start-Sleep -Seconds 2
+} while ([datetimeoffset]::UtcNow -lt $pgDeadline)
+if ($pgHealth -ne 'healthy') { Show-Logs @('logs', '--tail', '100', 'postgres'); throw "postgres did not become healthy" }
+
 Invoke-Compose @('up', '-d', '--build', '--force-recreate', '--no-deps', 'migrate')
 
 $migrateDeadline = [datetimeoffset]::UtcNow.AddMinutes(5)
@@ -58,12 +81,18 @@ do {
   $migrateState = docker inspect "${project}-migrate-1" --format '{{.State.Status}} {{.State.ExitCode}}'
   if ($LASTEXITCODE -ne 0) { throw "could not inspect ${project}-migrate-1" }
   if ($migrateState -match '^exited (\d+)$') {
-    if ($Matches[1] -ne '0') { throw "migrate exited $($Matches[1]). The previous web container was left in place." }
+    if ($Matches[1] -ne '0') {
+      Show-Logs @('logs', '--no-color', '--tail', '200', 'migrate')
+      throw "migrate exited $($Matches[1]). The previous web container was left in place."
+    }
     break
   }
   Start-Sleep -Seconds 2
 } while ([datetimeoffset]::UtcNow -lt $migrateDeadline)
-if ($migrateState -notmatch '^exited 0$') { throw "migrate did not finish" }
+if ($migrateState -notmatch '^exited 0$') {
+  Show-Logs @('logs', '--no-color', '--tail', '200', 'migrate')
+  throw "migrate did not finish (last state: $migrateState)"
+}
 
 Invoke-Compose @('up', '-d', '--build', '--force-recreate', '--no-deps', 'web', 'worker')
 Invoke-Compose @('ps')
