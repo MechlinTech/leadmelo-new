@@ -102,8 +102,9 @@ export default function Workspace({ section }: { section: Section }) {
     const editor = document.getElementById('campaign-editor');
     editor?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [editingCampaignId, campaignFormKey]);
-  async function mutate(path: string, method: string, body?: unknown, successMessage?: string | null) {
-    setBusy(true); setError('');
+  async function mutate(path: string, method: string, body?: unknown, successMessage?: string | null, skipBusy = false) {
+    if (!skipBusy) setBusy(true);
+    setError('');
     try {
       const result = await api(path, method, body);
       if (result.activation?.requested) {
@@ -115,7 +116,7 @@ export default function Workspace({ section }: { section: Section }) {
       return true;
     }
     catch (e) { showToast((e as Error).message, 'error'); return false; }
-    finally { setBusy(false); }
+    finally { if (!skipBusy) setBusy(false); }
   }
   function icpBody(form: FormData, prefix = '') {
     const body: Row = { name: value(form, prefix + 'name'), offer: value(form, prefix + 'offer' || 'offer'), minScore: number(form, prefix + 'minScore'), weeklyAppointmentGoal: number(form, prefix + 'weeklyAppointmentGoal') };
@@ -335,7 +336,7 @@ export default function Workspace({ section }: { section: Section }) {
             <Field name="notes" label="Notes (optional)" required={false} />
           </div><button disabled={busy}>Record meeting</button></form></>}
       </>}
-      {section === 'icps' && <><ul className="recordList">{icpPageData.slice.map(r => <li key={r.id}><strong>{r.name}</strong> &middot; {r.offer}{r.active === false && <span className="pill">Inactive</span>}<p>{(r.geographies ?? []).join(', ')} &middot; Minimum score {r.minScore}{r.weeklyAppointmentGoal != null && <> &middot; Weekly goal {r.weeklyAppointmentGoal}</>}</p><p className="muted">Industries: {(r.industries ?? []).join(', ') || '—'}. Sizes: {(r.companySizes ?? []).join(', ') || '—'}. Titles: {(r.buyerTitles ?? []).join(', ') || '—'}. Signals: {(r.buyingSignals ?? []).join(', ') || '—'}. Technologies: {(r.technologies ?? []).join(', ') || '—'}. Exclusions: {(r.exclusionRules ?? []).join(', ') || '—'}.</p>{canWrite && <div className="toolbar"><button type="button" className="secondary" disabled={busy} onClick={() => beginEditIcp(r)}>Edit</button><button type="button" className="secondary" disabled={busy} onClick={async () => { setActioningId(r.id); await mutate('icps', 'POST', { duplicateFrom: r.id }, `Duplicated “${r.name}”.`); setActioningId(null); }}>{actioningId === r.id ? <span className="spinner" aria-hidden="true" /> : null}Duplicate</button><button type="button" className="secondary" disabled={busy} onClick={async () => { if (window.confirm(`Remove “${r.name}”? Campaigns that use it will keep a deactivated copy.`)) { setActioningId(r.id); await mutate(`icps?id=${encodeURIComponent(r.id)}`, 'DELETE', undefined, 'ICP removed.'); setActioningId(null); } }}>{actioningId === r.id ? <span className="spinner" aria-hidden="true" /> : null}Delete</button></div>}</li>)}</ul>
+      {section === 'icps' && <><ul className="recordList">{icpPageData.slice.map(r => <li key={r.id}><strong>{r.name}</strong> &middot; {r.offer}{r.active === false && <span className="pill">Inactive</span>}<p>{(r.geographies ?? []).join(', ')} &middot; Minimum score {r.minScore}{r.weeklyAppointmentGoal != null && <> &middot; Weekly goal {r.weeklyAppointmentGoal}</>}</p><p className="muted">Industries: {(r.industries ?? []).join(', ') || '—'}. Sizes: {(r.companySizes ?? []).join(', ') || '—'}. Titles: {(r.buyerTitles ?? []).join(', ') || '—'}. Signals: {(r.buyingSignals ?? []).join(', ') || '—'}. Technologies: {(r.technologies ?? []).join(', ') || '—'}. Exclusions: {(r.exclusionRules ?? []).join(', ') || '—'}.</p>{canWrite && <div className="toolbar"><button type="button" className="secondary" disabled={busy || rowActioning[`icp-${r.id}`] || editingIcpId === r.id} onClick={() => beginEditIcp(r)}>Edit</button><button type="button" className="secondary" disabled={busy || rowActioning[`icp-${r.id}`]} onClick={async () => { setRowActioning(prev => ({ ...prev, [`icp-${r.id}`]: true })); await mutate('icps', 'POST', { duplicateFrom: r.id }, `Duplicated “${r.name}”.`, true); setRowActioning(prev => ({ ...prev, [`icp-${r.id}`]: false })); }}>{rowActioning[`icp-${r.id}`] ? <span className="spinner" aria-hidden="true" /> : null}Duplicate</button><button type="button" className="secondary" disabled={busy || rowActioning[`icp-${r.id}`]} onClick={async () => { if (window.confirm(`Remove “${r.name}”? Campaigns that use it will keep a deactivated copy.`)) { setRowActioning(prev => ({ ...prev, [`icp-${r.id}`]: true })); await mutate(`icps?id=${encodeURIComponent(r.id)}`, 'DELETE', undefined, 'ICP removed.', true); setRowActioning(prev => ({ ...prev, [`icp-${r.id}`]: false })); } }}>{rowActioning[`icp-${r.id}`] ? <span className="spinner" aria-hidden="true" /> : null}Delete</button></div>}</li>)}</ul>
         <Pager page={icpPageData.page} pages={icpPageData.pages} total={icpPageData.total} label="profiles" onPage={setIcpPage} />
         <h2 id="icp-editor">{editingIcpId ? 'Edit ICP' : 'Create ICP'}</h2>
         {canWrite ? <><AiAssist onApply={applyAi} />
