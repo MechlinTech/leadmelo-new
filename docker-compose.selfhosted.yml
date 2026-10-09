@@ -99,7 +99,10 @@ services:
       # where only bearers listed in that file are accepted.
       GATEWAY_TAXONOMY_FILE: /etc/leadmelo-gateway/taxonomy.json
       GATEWAY_STORE_FILE: /var/lib/leadmelo-gateway/store.jsonl
-    ports: ["127.0.0.1:8788:8788"]
+    # Host port is per-deployment: dev and prod run side by side on one host, and a fixed 8788 made
+    # the second gateway fail to bind ("port is already allocated"). The in-network port is always
+    # 8788, so PROVIDER_GATEWAY_URL=http://gateway:8788 is unaffected.
+    ports: ["127.0.0.1:${GATEWAY_HOST_PORT:-8788}:8788"]
     volumes:
       - ${GATEWAY_CONFIG_DIR:-./gateway-config}:/etc/leadmelo-gateway:ro
       - gatewaydata:/var/lib/leadmelo-gateway

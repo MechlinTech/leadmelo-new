@@ -67,8 +67,20 @@ test('services run commands that exist, and the health checks target real routes
   assert.match(svc.migrate.command.join(' '), /npm run db:deploy && node --import tsx scripts\/database-role\.ts/);
   for (const f of ['scripts/database-role.ts', 'scripts/worker-health.ts', 'gateway/src/main.ts', 'worker/index.ts', 'app/api/health/route.ts', 'app/api/ready/route.ts']) assert.ok(existsSync(f), f);
   assert.match(svc.gateway.healthcheck.test.join(' '), /8788\/health/);
-  assert.equal(svc.gateway.environment.PORT, '8788'); assert.match(svc.gateway.ports[0], /8788:8788$/);
+  assert.equal(svc.gateway.environment.PORT, '8788');
+  // The in-network port is fixed at 8788 so PROVIDER_GATEWAY_URL=http://gateway:8788 always works;
+  // only the published host port varies, because dev and prod share a machine.
+  assert.match(svc.gateway.ports[0], /GATEWAY_HOST_PORT:-8788\}:8788$/);
   assert.match(svc.web.ports[0], /HOST_PORT:-7676|:7676:3000/);
+});
+
+test('the deploy starts the gateway, or the app is left pointing at a hostname with nothing behind it', () => {
+  const deploy = readFileSync('scripts/deploy.ps1', 'utf8');
+  // The gateway sits behind an optional compose profile, which `up web worker` never starts. Without
+  // this step every credential save reported "the gateway could not be reached".
+  assert.match(deploy, /--profile.{0,4}gateway|--profile',\s*'gateway/, 'the gateway profile is enabled during deploy');
+  assert.match(deploy, /PROVIDER_GATEWAY_URL/, 'starting it is gated on the deployment naming a gateway');
+  assert.match(deploy, /gateway-1/, 'the script waits for the gateway container to report healthy');
 });
 
 test('Dockerfile runs as a non-root user and prepares the gateway state directory', () => {

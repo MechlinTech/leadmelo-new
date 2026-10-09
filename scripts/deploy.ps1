@@ -95,6 +95,26 @@ if ($migrateState -notmatch '^exited 0$') {
 }
 
 Invoke-Compose @('up', '-d', '--build', '--force-recreate', '--no-deps', 'web', 'worker')
+
+# The gateway lives behind the optional "gateway" profile, which a plain `up web worker` never starts.
+# That left the web container resolving PROVIDER_GATEWAY_URL to a hostname with no container behind
+# it, so saving a bearer token reported "the gateway could not be reached" even though the operator
+# had configured it. When the deployment names a gateway, start it as part of the same release.
+# Skipped when PROVIDER_GATEWAY_URL is empty, which is how a deployment says it uses no gateway.
+if ($env:PROVIDER_GATEWAY_URL -and $env:PROVIDER_GATEWAY_URL.Trim()) {
+  Invoke-Compose @('--profile', 'gateway', 'up', '-d', '--build', '--force-recreate', '--no-deps', 'gateway')
+  # /health is unauthenticated, so this proves the service is actually answering before anyone
+  # spends a round trip finding out from a failed credential save.
+  $gwDeadline = [datetimeoffset]::UtcNow.AddMinutes(2)
+  do {
+    $gwHealth = docker inspect "${project}-gateway-1" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>$null
+    if ($LASTEXITCODE -eq 0 -and $gwHealth -eq 'healthy') { break }
+    if ($gwHealth -eq 'unhealthy' -or $gwHealth -eq 'exited') { Show-Logs @('logs', '--tail', '100', 'gateway'); throw "gateway is $gwHealth" }
+    Start-Sleep -Seconds 2
+  } while ([datetimeoffset]::UtcNow -lt $gwDeadline)
+  if ($gwHealth -ne 'healthy') { Show-Logs @('logs', '--tail', '100', 'gateway'); throw "gateway did not become healthy (last state: $gwHealth)" }
+}
+
 Invoke-Compose @('ps')
 
 $runningImage = docker inspect "${project}-web-1" --format '{{.Config.Image}}'
