@@ -7,22 +7,23 @@ import { showToast } from './Toaster';
 type Member = { id: string; email: string; name: string | null; role: string; disabled: boolean; mfaEnabled: boolean; you: boolean };
 
 export default function TeamMembers() {
-  const [members, setMembers] = useState<Member[] | null>(null), [denied, setDenied] = useState(false), [link, setLink] = useState<{ email: string; url: string } | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [members, setMembers] = useState<Member[] | null>(null), [denied, setDenied] = useState(false), [link, setLink] = useState<{ email: string; url: string } | null>(null), [error, setError] = useState('');
+  const [actioning, setActioning] = useState<Record<string, boolean>>({});
   const [page, setPage] = useState(1);
   useEffect(() => { api<Member[]>('users').then(setMembers).catch(e => { if ((e as Error).message === 'admin_required') setDenied(true); else setError((e as Error).message); }); }, []);
   if (denied) return null;
   async function reset(m: Member) {
-    setBusy(true); setError(''); setLink(null);
-    try { const r = await api<{ resetUrl: string }>(`users/${m.id}/reset`, 'POST', {}); setLink({ email: m.email, url: r.resetUrl }); } catch (e) { showToast((e as Error).message, 'error'); } finally { setBusy(false); }
+    setActioning(prev => ({ ...prev, [`${m.id}-reset`]: true })); setError(''); setLink(null);
+    try { const r = await api<{ resetUrl: string }>(`users/${m.id}/reset`, 'POST', {}); setLink({ email: m.email, url: r.resetUrl }); } catch (e) { showToast((e as Error).message, 'error'); } finally { setActioning(prev => ({ ...prev, [`${m.id}-reset`]: false })); }
   }
   async function setAccess(member: Member) {
-    setBusy(true); setError(''); setLink(null);
+    setActioning(prev => ({ ...prev, [`${member.id}-access`]: true })); setError(''); setLink(null);
     try {
       await api('users', 'PATCH', { id: member.id, disabled: !member.disabled });
       setMembers(await api<Member[]>('users'));
       showToast(member.disabled ? `Access restored for ${member.email}.` : `Access disabled for ${member.email}; active sessions were revoked.`);
     } catch (e) { setError((e as Error).message); }
-    finally { setBusy(false); }
+    finally { setActioning(prev => ({ ...prev, [`${member.id}-access`]: false })); }
   }
   const pageData = members ? pageSlice(members, page, 10) : null;
   return <section aria-labelledby="members-title">
@@ -33,7 +34,7 @@ export default function TeamMembers() {
       <caption className="sr-only">Members of this workspace</caption>
       <thead><tr><th scope="col">Email</th><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Two-factor</th><th scope="col">Access</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead>
       <tbody>{pageData!.slice.map(m => <tr key={m.id}><td>{m.email}{m.you && <span className="pill" style={{ marginLeft: 6 }}>You</span>}</td><td>{m.name?.trim() || m.email.split('@')[0]}</td><td>{m.role.replace('_', ' ').toLowerCase()}</td><td>{m.mfaEnabled ? 'On' : 'Off'}</td>
-        <td>{m.disabled ? 'Disabled' : 'Active'}</td><td>{!m.you && <><button type="button" className="secondary" disabled={busy} onClick={() => void setAccess(m)}>{m.disabled ? 'Restore access' : 'Disable access'}</button>{!m.disabled && <button type="button" className="secondary" disabled={busy} onClick={() => void reset(m)}>Create reset link</button>}</>}</td></tr>)}</tbody>
+        <td>{m.disabled ? 'Disabled' : 'Active'}</td><td>{!m.you && <div style={{ display: 'flex', gap: '8px' }}><button type="button" className="secondary" disabled={actioning[`${m.id}-access`]} onClick={() => void setAccess(m)}>{actioning[`${m.id}-access`] ? <span className="spinner" aria-hidden="true" /> : null}{m.disabled ? 'Restore access' : 'Disable access'}</button>{!m.disabled && <button type="button" className="secondary" disabled={actioning[`${m.id}-reset`]} onClick={() => void reset(m)}>{actioning[`${m.id}-reset`] ? <span className="spinner" aria-hidden="true" /> : null}Create reset link</button>}</div>}</td></tr>)}</tbody>
     </table></div>
     <Pager page={pageData!.page} pages={pageData!.pages} total={pageData!.total} label="members" onPage={setPage} /></>}
   </section>;
