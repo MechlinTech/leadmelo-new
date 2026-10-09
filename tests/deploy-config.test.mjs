@@ -83,6 +83,23 @@ test('the deploy starts the gateway, or the app is left pointing at a hostname w
   assert.match(deploy, /gateway-1/, 'the script waits for the gateway container to report healthy');
 });
 
+test('a generated env file cannot silently lose PROVIDER_GATEWAY_URL', () => {
+  // An empty value is dropped by the copy loop rather than written, and compose then substitutes an
+  // empty default. That produced a healthy deployment where every credential save said the gateway
+  // was unreachable, with nothing naming the missing variable.
+  const writer = readFileSync('scripts/write-deploy-env.ps1', 'utf8');
+  assert.match(writer, /PROVIDER_GATEWAY_URL/, 'the generator knows about the variable');
+  assert.match(writer, /if \(-not \$map\['PROVIDER_GATEWAY_URL'\]\)/, 'it defaults the value rather than dropping it');
+  assert.match(writer, /http:\/\/gateway:8788/, 'the default points at the bundled gateway');
+  assert.match(writer, /LEADMELO_NO_GATEWAY/, 'a deployment that runs no gateway can opt out explicitly');
+  assert.match(writer, /GATEWAY_HOST_PORT/, 'the per-deployment gateway host port survives generation');
+
+  // And the deploy refuses to ship an empty value instead of failing later in the UI.
+  const deploy = readFileSync('scripts/deploy.ps1', 'utf8');
+  assert.match(deploy, /PROVIDER_GATEWAY_URL is empty/, 'an unset gateway URL fails the deploy loudly');
+  assert.match(deploy, /LEADMELO_NO_GATEWAY/, 'with an explicit opt-out for gateway-less deployments');
+});
+
 test('Dockerfile runs as a non-root user and prepares the gateway state directory', () => {
   const d = readFileSync('Dockerfile', 'utf8');
   assert.match(d, /USER node/); assert.match(d, /mkdir -p \/var\/lib\/leadmelo-gateway && chown node:node \/var\/lib\/leadmelo-gateway/);

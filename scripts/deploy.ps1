@@ -129,6 +129,16 @@ if ($created -lt $deployStarted.AddSeconds(-15)) {
   throw "web container was not recreated for $expectedImage (created $createdRaw)"
 }
 
+# A generated .env.prod can silently lose a variable: an empty value in the host env file is dropped
+# rather than written, and compose then substitutes its own default (empty for this one). The result
+# was a healthy-looking deployment in which no credential save could ever reach the gateway. Refuse
+# to deploy with an unset value rather than shipping that.
+if (-not $env:PROVIDER_GATEWAY_URL -or -not $env:PROVIDER_GATEWAY_URL.Trim()) {
+  if ($env:LEADMELO_NO_GATEWAY -notmatch '^(1|true|yes|on)$') {
+    throw "PROVIDER_GATEWAY_URL is empty in $envFile. Set it (for the bundled gateway: http://gateway:8788), or set LEADMELO_NO_GATEWAY=1 if this deployment runs no gateway. Without it every provider credential save reports the gateway as unreachable."
+  }
+}
+
 $health = "http://127.0.0.1:$($env:HOST_PORT)/api/health"
 $deadline = [datetimeoffset]::UtcNow.AddMinutes(3)
 do {
