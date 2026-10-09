@@ -9,6 +9,7 @@ export default function SecuritySettings() {
   const [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [mfa, setMfa] = useState<{ secret: string; otpauthUri: string } | null>(null), [codes, setCodes] = useState<string[] | null>(null);
   const [invites, setInvites] = useState<Invite[]>([]), [link, setLink] = useState('');
+  const [revoking, setRevoking] = useState<Record<string, boolean>>({});
   const loadInvites = useCallback(async () => { try { setInvites(await api('invites')); } catch (e) { setError((e as Error).message); } }, []);
   useEffect(() => { void loadInvites(); }, [loadInvites]);
   async function run(fn: () => Promise<void>) { setBusy(true); setError(''); try { await fn(); } catch (e) { showToast((e as Error).message, 'error'); } finally { setBusy(false); } }
@@ -16,6 +17,21 @@ export default function SecuritySettings() {
     const r = await api<{ acceptUrl: string; emailed?: boolean; emailError?: string }>('invites', 'POST', { email: data.get('email'), role: data.get('role') });
     setLink(r.emailed ? '' : r.acceptUrl); showToast(r.emailed ? 'Invitation email sent. It includes the link to join this workspace.' : `${userError(r.emailError)} Copy the link below and send it to the person; it is shown only once.`); form.reset(); await loadInvites();
   }); };
+  const revoke = async (id: string) => {
+    setRevoking(prev => ({ ...prev, [id]: true }));
+    try {
+      await api(`invites?id=${encodeURIComponent(id)}`, 'DELETE');
+      await loadInvites();
+    } catch (e) {
+      showToast((e as Error).message, 'error');
+    } finally {
+      setRevoking(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  };
   const enable = (e: FormEvent<HTMLFormElement>) => { e.preventDefault(); const data = new FormData(e.currentTarget); return run(async () => {
     setCodes((await api<{ recoveryCodes: string[] }>('auth/mfa/enable', 'POST', { code: String(data.get('code')) })).recoveryCodes); setMfa(null);
   }); };
@@ -58,7 +74,7 @@ export default function SecuritySettings() {
     <h2 id="team-title">Team</h2>
     <form className="editor" onSubmit={invite}><div className="formGrid"><label>Invite by email<input className="input" name="email" type="email" required/></label><label>Role<select name="role" defaultValue="MEMBER"><option value="MEMBER">Member (view)</option><option value="MANAGER">Manager (run campaigns)</option><option value="TENANT_ADMIN">Administrator</option></select></label></div><button disabled={busy}>Create invitation</button></form>
     {link && <p>Invitation link: <code>{link}</code></p>}
-    {invites.length > 0 && <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><caption className="muted">Pending invitations</caption><thead><tr><th>Email</th><th>Role</th><th>Expires</th><th><span className="skip">Action</span></th></tr></thead><tbody>{invites.map(i => <tr key={i.id}><td>{i.email}</td><td>{i.role}</td><td>{new Date(i.expiresAt).toLocaleString()}</td><td><button disabled={busy} onClick={() => void run(async () => { await api(`invites?id=${encodeURIComponent(i.id)}`, 'DELETE'); await loadInvites(); })}>Revoke</button></td></tr>)}</tbody></table></div>}
+    {invites.length > 0 && <div className="tableWrap" tabIndex={0} role="region" aria-label="Data table"><table><caption className="muted">Pending invitations</caption><thead><tr><th>Email</th><th>Role</th><th>Expires</th><th><span className="skip">Action</span></th></tr></thead><tbody>{invites.map(i => <tr key={i.id}><td>{i.email}</td><td>{i.role}</td><td>{new Date(i.expiresAt).toLocaleString()}</td><td><button disabled={busy || revoking[i.id]} onClick={() => void revoke(i.id)}>Revoke</button></td></tr>)}</tbody></table></div>}
   </section>
   </>;
 }
