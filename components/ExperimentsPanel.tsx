@@ -15,6 +15,9 @@ const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(1)}%` : '�
 
 export default function ExperimentsPanel() {
   const [items, setItems] = useState<Experiment[] | null>(null), [campaigns, setCampaigns] = useState<Campaign[]>([]), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [starting, setStarting] = useState<Record<string, boolean>>({});
+  const [stopping, setStopping] = useState<Record<string, boolean>>({});
+  const [loadingResults, setLoadingResults] = useState<Record<string, boolean>>({});
   const [results, setResults] = useState<Record<string, Results>>({});
   const [page, setPage] = useState(1);
   const load = useCallback(async () => { try { setItems(await api<Experiment[]>('experiments')); setCampaigns(await api<Campaign[]>('campaigns')); } catch (e) { setError((e as Error).message); } }, []);
@@ -25,6 +28,60 @@ export default function ExperimentsPanel() {
     await api('experiments', 'POST', { campaignId: f.get('campaignId'), stepOrder: Number(f.get('stepOrder')), name: f.get('name'), primaryMetric: f.get('primaryMetric'), minSample: Number(f.get('minSample')), variants: [{ label: String(f.get('label')), subject: f.get('subject'), body: f.get('body') }] });
     form.reset();
   }, 'Experiment created as a draft. Start it when you are ready.'); };
+
+  const startExperiment = async (x: Experiment) => {
+    setStarting(prev => ({ ...prev, [x.id]: true }));
+    setError('');
+    try {
+      await api('experiments', 'PATCH', { id: x.id, status: 'RUNNING' });
+      showToast('Experiment started.');
+      await load();
+    } catch (e) {
+      showToast(friendly((e as Error).message), 'error');
+    } finally {
+      setStarting(prev => {
+        const next = { ...prev };
+        delete next[x.id];
+        return next;
+      });
+    }
+  };
+
+  const stopExperiment = async (x: Experiment) => {
+    setStopping(prev => ({ ...prev, [x.id]: true }));
+    setError('');
+    try {
+      await api('experiments', 'PATCH', { id: x.id, status: 'STOPPED' });
+      showToast('Experiment stopped.');
+      await load();
+    } catch (e) {
+      showToast(friendly((e as Error).message), 'error');
+    } finally {
+      setStopping(prev => {
+        const next = { ...prev };
+        delete next[x.id];
+        return next;
+      });
+    }
+  };
+
+  const loadResults = async (x: Experiment) => {
+    setLoadingResults(prev => ({ ...prev, [x.id]: true }));
+    setError('');
+    try {
+      const r = await api<Results>(`experiments?id=${x.id}`);
+      setResults(s => ({ ...s, [x.id]: r }));
+      await load();
+    } catch (e) {
+      showToast(friendly((e as Error).message), 'error');
+    } finally {
+      setLoadingResults(prev => {
+        const next = { ...prev };
+        delete next[x.id];
+        return next;
+      });
+    }
+  };
 
   const pageData = items ? pageSlice(items, page, 10) : null;
 
@@ -38,9 +95,9 @@ export default function ExperimentsPanel() {
           <div className="toolbar"><strong title={x.name} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>{x.name}</strong><span className="pill">{x.status.toLowerCase()}</span></div>
           <p className="muted">{campaign?.name ?? 'Campaign'} · email {x.stepOrder} · goal: {x.primaryMetric.replace('_', ' ').toLowerCase()} · minimum {x.minSample} sends per variant</p>
           <div className="hero-actions" style={{ marginTop: 0 }}>
-            {(x.status === 'DRAFT' || x.status === 'STOPPED') && <button type="button" disabled={busy} onClick={() => void run(() => api('experiments', 'PATCH', { id: x.id, status: 'RUNNING' }), 'Experiment started.')}>Start</button>}
-            {x.status === 'RUNNING' && <button type="button" className="secondary" disabled={busy} onClick={() => void run(() => api('experiments', 'PATCH', { id: x.id, status: 'STOPPED' }), 'Experiment stopped.')}>Stop</button>}
-            <button type="button" className="secondary" disabled={busy} onClick={() => void run(async () => { const r = await api<Results>(`experiments?id=${x.id}`); setResults(s => ({ ...s, [x.id]: r })); })}>View results</button>
+            {(x.status === 'DRAFT' || x.status === 'STOPPED') && <button type="button" disabled={busy || starting[x.id]} onClick={() => void startExperiment(x)}>Start</button>}
+            {x.status === 'RUNNING' && <button type="button" className="secondary" disabled={busy || stopping[x.id]} onClick={() => void stopExperiment(x)}>Stop</button>}
+            <button type="button" className="secondary" disabled={busy || loadingResults[x.id]} onClick={() => void loadResults(x)}>View results</button>
           </div>
           {res && <div style={{ marginTop: 10 }}>
             <p role="status">{VERDICT_TEXT[res.verdict.status] ?? res.verdict.status}</p>

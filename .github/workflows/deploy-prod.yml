@@ -19,12 +19,16 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+
       - name: Write environment file
         shell: powershell
         env:
           APP_URL: "${{ secrets.APP_URL || vars.APP_URL }}"
           HOST_PORT: "${{ vars.HOST_PORT }}"
           COMPOSE_PROJECT_NAME: "${{ vars.COMPOSE_PROJECT_NAME }}"
+          OUTBOUND_ENABLED: "${{ vars.OUTBOUND_ENABLED }}"
+          PLAN_ENFORCEMENT: "${{ vars.PLAN_ENFORCEMENT }}"
+          SENDER_HEALTH_AUTO: "${{ vars.SENDER_HEALTH_AUTO }}"
           POSTGRES_DB: "${{ vars.POSTGRES_DB }}"
           RELEASE_TAG: "${{ github.sha }}"
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
@@ -41,6 +45,7 @@ jobs:
           if (-not $env:COMPOSE_PROJECT_NAME) { $env:COMPOSE_PROJECT_NAME = 'leadmelo-prod' }
           if (-not $env:POSTGRES_DB) { $env:POSTGRES_DB = 'leadmelo_prod' }
           & ./scripts/write-deploy-env.ps1 -Environment production -ReleaseTag $env:RELEASE_TAG
+
       - name: Deploy Docker stack
         shell: powershell
         run: ./scripts/deploy.ps1 -Environment production
