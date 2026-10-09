@@ -73,7 +73,7 @@ export default function ProviderCredentials() {
 
   return <section aria-labelledby="provider-creds-title">
     <h2 id="provider-creds-title">Provider credentials</h2>
-    <p className="muted">The credentials this workspace uses to find prospects (Apollo) and verify their email addresses (Hunter), plus the bearer token that identifies the workspace to the provider gateway. Values are encrypted before they are stored and are never sent back to this page: an existing key is shown only as saved. Leave a field blank to keep what is stored.</p>
+    <p className="muted">The credentials this workspace uses to find prospects (Apollo) or verify their email addresses (Hunter), plus the bearer token that identifies the workspace to the provider gateway. You only need to configure the provider(s) you intend to use. Values are encrypted before they are stored and are never sent back to this page: an existing key is shown only as saved. Leave a field blank to keep what is stored.</p>
     {status && <p className="muted">Gateway keys: {status.gatewaySynced === null ? 'gateway not reachable, so the state is unknown' : status.gatewaySynced ? 'sent to the gateway' : 'not sent yet'}. The gateway holds them in memory only, so they are re-sent automatically whenever a discovery or verification run needs them.</p>}
     {error && <p role="alert" className="error" style={{ marginBottom: 16 }}>{error}</p>}
     <div className="editor">
