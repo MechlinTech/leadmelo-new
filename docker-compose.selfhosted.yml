@@ -19,8 +19,6 @@ x-app: &app
     ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-}
     # TEMP QA ONLY: when set, follow-up sequence steps are scheduled N minutes out instead of N business days.
     TEMP_QA_FOLLOWUP_MINUTES: ${TEMP_QA_FOLLOWUP_MINUTES:-}
-    GATEWAY_DUMMY_DISCOVERY: ${GATEWAY_DUMMY_DISCOVERY:-false}
-    GATEWAY_DUMMY_EMAILS: ${GATEWAY_DUMMY_EMAILS:-}
   networks: [backend]
   init: true
   security_opt: [no-new-privileges:true]
@@ -94,11 +92,13 @@ services:
     environment:
       GATEWAY_HOST: 0.0.0.0
       PORT: "8788"
-      GATEWAY_TENANTS_FILE: /etc/leadmelo-gateway/tenants.json
+      # GATEWAY_TENANTS_FILE is intentionally NOT set. With no tenants file the gateway is
+      # self-registering: each tenant is defined by the bearer token saved in LeadMelo Settings,
+      # which is also how its Apollo and Hunter keys arrive, so there is no file to hand-edit.
+      # Setting this path back to /etc/leadmelo-gateway/tenants.json restores a closed allow-list,
+      # where only bearers listed in that file are accepted.
       GATEWAY_TAXONOMY_FILE: /etc/leadmelo-gateway/taxonomy.json
       GATEWAY_STORE_FILE: /var/lib/leadmelo-gateway/store.jsonl
-      GATEWAY_DUMMY_DISCOVERY: ${GATEWAY_DUMMY_DISCOVERY:-false}
-      GATEWAY_DUMMY_EMAILS: ${GATEWAY_DUMMY_EMAILS:-}
     ports: ["127.0.0.1:8788:8788"]
     volumes:
       - ${GATEWAY_CONFIG_DIR:-./gateway-config}:/etc/leadmelo-gateway:ro

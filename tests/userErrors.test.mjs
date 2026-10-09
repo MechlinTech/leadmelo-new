@@ -47,6 +47,9 @@ test('every gateway failure code tells the user what to do next', () => {
   }
   assert.match(userError('gateway_not_configured'), /PROVIDER_GATEWAY_URL/);
   assert.match(userError('gateway_unreachable'), /gateway service is running/);
-  assert.match(userError('gateway_http_409'), /tenants\.json/);
+  // The message must point at the place the operator can actually act now that vendor keys come from
+  // Settings rather than from a hand-edited tenants file.
+  assert.match(userError('gateway_http_409'), /Settings/);
+  assert.doesNotMatch(userError('gateway_http_409'), /tenants\.json/, 'no tenants file to edit any more');
   assert.match(userError('max_attempts_exhausted'), /three attempts/);
 });

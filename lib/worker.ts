@@ -92,31 +92,9 @@ export async function processRun(now = new Date()) {
         if (await tx.enrollment.count({ where: { campaignId: c.id, createdAt: { gte: week } } }) >= currentCampaign.weeklyProspectCap) return false;
         const lead = await tx.lead.upsert({ where: { tenantId_domain: { tenantId: c.tenantId, domain: p.domain } }, update: {}, create: { tenantId: c.tenantId, company: p.company, domain: p.domain, contactName: p.fullName, contactEmail: p.email, score: q.score, qualification: 'QUALIFIED', source: p.evidenceUrl, signalSummary: p.evidenceSummary } });
         const contact = await tx.contact.upsert({ where: { tenantId_email: { tenantId: c.tenantId, email: p.email } }, update: { verification: p.verification, lastVerifiedAt: new Date(p.verifiedAt) }, create: { tenantId: c.tenantId, leadId: lead.id, fullName: p.fullName, title: p.title, email: p.email, verification: p.verification, lastVerifiedAt: new Date(p.verifiedAt) } });
-        const dummy = typeof p.evidenceSummary === 'string' && p.evidenceSummary.includes('Dummy discovery prospect');
         const first = await tx.sequenceStep.findFirstOrThrow({ where: { campaignId: c.id }, orderBy: { stepOrder: 'asc' } });
         const outreachKey = `${c.id}:${contact.id}:${first.stepOrder}`;
         const scheduledAt = addBusinessDays(now, first.waitBusinessDays, c.timezone, c.holidays);
-        // Dummy gateway prospects must re-queue on every activate/discover for QA.
-        // Skip the normal 30-day ownership cooldown and reopen the same campaign enrollment.
-        if (dummy) {
-          await tx.enrollment.updateMany({ where: { tenantId: c.tenantId, contactId: contact.id, campaignId: { not: c.id }, stoppedAt: null }, data: { stoppedAt: now, stopReason: 'dummy_rediscover' } });
-          const mine = await tx.enrollment.findUnique({ where: { campaignId_contactId: { campaignId: c.id, contactId: contact.id } } });
-          if (mine) await tx.enrollment.update({ where: { id: mine.id }, data: { stoppedAt: null, stopReason: null, score: q.score, hasBuyer: q.hasBuyer, hasPainSignal: q.hasPainSignal, evidence: p } });
-          else await tx.enrollment.create({ data: { tenantId: c.tenantId, campaignId: c.id, contactId: contact.id, score: q.score, hasBuyer: q.hasBuyer, hasPainSignal: q.hasPainSignal, evidence: p } });
-          await tx.outreachEvent.upsert({
-            where: { idempotencyKey: outreachKey },
-            create: { tenantId: c.tenantId, campaignId: c.id, contactId: contact.id, leadId: lead.id, stepOrder: first.stepOrder, scheduledAt, idempotencyKey: outreachKey },
-            // createdAt is bumped so a re-queued message sorts as the newest row. The outreach
-            // queue is ordered by createdAt and only the newest 25 are rendered, so reusing the
-            // original creation time left every re-queued message stranded below the fold: the
-            // run reported messagesQueued, but nothing new ever appeared in the queue.
-            update: { status: 'QUEUED', scheduledAt, approvedAt: null, error: null, attempts: 0, leaseUntil: null, leaseToken: null, reservedAt: null, providerMessageId: null, sentAt: null, subject: null, body: null, createdAt: now }
-          });
-          // The outreach key is reused. A prior MailReceipt would reject the new body
-          // with m365_idempotency_conflict, or return the old ACCEPTED send and skip it.
-          await tx.mailReceipt.deleteMany({ where: { tenantId: c.tenantId, key: outreachKey } });
-          return true;
-        }
         // One contact is owned by one campaign during a sequence, with a 30-day cooldown.
         if (await tx.enrollment.findFirst({ where: { tenantId: c.tenantId, contactId: contact.id, OR: [{ stoppedAt: null }, { stoppedAt: { gt: new Date(now.getTime() - 30 * 86400000) } }, { campaignId: c.id }] } })) return false;
         await tx.enrollment.create({ data: { tenantId: c.tenantId, campaignId: c.id, contactId: contact.id, score: q.score, hasBuyer: q.hasBuyer, hasPainSignal: q.hasPainSignal, evidence: p } });

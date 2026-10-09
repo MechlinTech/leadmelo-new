@@ -18,20 +18,36 @@ Reliability: results are stored per `Idempotency-Key` (same key + same request r
 
 ## Setup
 
-1. Choose tenant credentials. For each LeadMelo tenant, generate a long random bearer token (`openssl rand -hex 32`), save it in that tenant's LeadMelo Settings as the gateway credential, and put only its SHA-256 here:
-   `printf %s "<token>" | sha256sum`
-2. Create `tenants.json` from `gateway/tenants.example.json` with that tenant's **own** Apollo and Hunter keys. `chmod 600` it and keep it out of git; prefer your secret manager.
-3. Optionally create `taxonomy.json` from `gateway/taxonomy.example.json`. **Without an industry mapping nothing will qualify**, because Apollo's industry names ("computer software") will not equal your ICP's ("SaaS"). Add only mappings you consider genuinely equivalent.
-4. Run behind a TLS reverse proxy (LeadMelo requires an https URL; see `deploy/caddy` and `deploy/nginx`):
+1. **Set the gateway up in Settings.** Give each tenant a long random bearer token (`openssl rand -hex 32`) and save it as that tenant's bearer token in LeadMelo Settings, alongside its Apollo and Hunter keys. Saving pushes everything to the gateway over `PUT /credentials`, and there is no file to create or keep in sync. See "Tenants and the allow-list" below for what that trades away.
+2. Optionally create `taxonomy.json` from `gateway/taxonomy.example.json`. **Without an industry mapping nothing will qualify**, because Apollo's industry names ("computer software") will not equal your ICP's ("SaaS"). Add only mappings you consider genuinely equivalent.
+3. Run behind a TLS reverse proxy (LeadMelo requires an https URL; see `deploy/caddy` and `deploy/nginx`):
    ```
-   GATEWAY_TENANTS_FILE=/etc/leadmelo/tenants.json GATEWAY_TAXONOMY_FILE=/etc/leadmelo/taxonomy.json \
+   GATEWAY_TAXONOMY_FILE=/etc/leadmelo/taxonomy.json \
    GATEWAY_STORE_FILE=/var/lib/leadmelo-gateway/store.jsonl PORT=8788 npm run gateway
    ```
    Set `PROVIDER_GATEWAY_URL` for the LeadMelo web and worker to the proxy's https URL.
 
+## Tenants and the allow-list
+
+`GATEWAY_TENANTS_FILE` is **optional**. Two modes:
+
+| Mode | `GATEWAY_TENANTS_FILE` | Who may use the gateway |
+|---|---|---|
+| **Self-registering** (default, used by compose) | unset | Anyone who can reach the port. Each bearer defines its own tenant. |
+| **Allow-list** | set to a non-empty file | Only bearers whose SHA-256 is in the file. |
+
+In self-registering mode there is no allow-list deciding who may talk to the gateway, so **any caller who can reach the port can register a tenant and spend vendor credits**. That is only acceptable because the gateway holds no database credentials and is bound to loopback or the private compose network. If you expose it to the internet, set `GATEWAY_TENANTS_FILE` back: a non-empty file turns self-registration off and restores the closed allow-list. (The file then narrows access rather than merely seeding it.)
+
+Two properties make self-registering safer than it looks, both pinned by tests in `tests/gateway.test.mjs`:
+
+- **First-claim-wins.** The first bearer to claim a tenant ID owns it for the life of the process; a different bearer claiming that ID is refused with `409`. One tenant cannot be taken over by another.
+- **One bearer, one tenant.** A registered bearer that restates itself as a different tenant gets `403 tenant_mismatch`. A leaked bearer cannot be re-aimed at someone else's data.
+
+Bindings live in memory, so a restart re-teaches them from whatever Settings pushes next. `chmod 600` any tenants file you do keep: it holds vendor keys in plaintext.
+
 | Variable | Default | Meaning |
 |---|---|---|
-| `GATEWAY_TENANTS_FILE` | required | tenant bindings and vendor keys |
+| `GATEWAY_TENANTS_FILE` | none (self-registering) | optional tenant bindings and vendor keys. Setting it to a non-empty file also turns self-registration **off**, restricting the gateway to those bearers |
 | `GATEWAY_TAXONOMY_FILE` | none | vendor-to-ICP wording maps |
 | `GATEWAY_STORE_FILE` | in memory | append-only file so a restart does not repurchase data (mode 0600, not encrypted) |
 | `GATEWAY_HOST` / `PORT` | 127.0.0.1 / 8788 | bind address |
@@ -39,12 +55,6 @@ Reliability: results are stored per `Idempotency-Key` (same key + same request r
 | `GATEWAY_DISCOVERY_DEADLINE_MS` | 90000 | stop a discovery job after this long, returning what it has |
 | `GATEWAY_MAX_ENRICH_PER_REQUEST` | 60 | credit budget per request (also capped at 4 x limit) |
 | `GATEWAY_MAX_PAGES` | 3 | search pages per job |
-| `GATEWAY_DUMMY_DISCOVERY` | false | when `true`/`on`/`1`, `POST /discover` returns synthetic prospects and never calls Apollo |
-| `GATEWAY_DUMMY_EMAILS` | empty | comma/space-separated emails used as dummy leads (required when dummy discovery is on); each address becomes one prospect |
-
-### Dummy discovery (dev/test only)
-
-Use this to exercise LeadMelo’s campaign → enrollment → outreach path without spending Apollo credits. Prospects are built from `GATEWAY_DUMMY_EMAILS` using the request ICP’s first industry, size band, geography, buyer title and `Hiring <role>` signal so they still pass LeadMelo qualification. Already-returned emails are remembered per tenant+campaign (same as enrich “seen” markers). Turn it off for any run that should hit Apollo.
 
 ## Assumptions that must be confirmed live (any of these may be wrong)
 
@@ -60,7 +70,8 @@ Use this to exercise LeadMelo’s campaign → enrollment → outreach path with
 
 - **No proactive rate limiting.** Documented limits (Hunter 10 requests/second and 300/minute; Apollo enrichment 600 calls/hour on the documented endpoint, lower on some plans) are only handled by reacting to 429/403 with `503 Retry-After`. Ten budget-sized runs in an hour can exhaust Apollo's hourly allowance.
 - Single process; the store is not shared between instances and the file grows without bound.
-- The tenants file holds vendor keys in plaintext.
+- A tenants file holds vendor keys in plaintext. In the default self-registering mode vendor keys live only in the gateway's memory and are re-pushed from LeadMelo Settings after a restart.
+- **No allow-list by default.** With `GATEWAY_TENANTS_FILE` unset, anyone who can reach the port can register a tenant (first-claim-wins, and one bearer cannot change tenant). Set the variable to restrict this.
 - No monetary spend tracking: LeadMelo's ledger counts prospects returned, not Apollo credits spent (people who were enriched but rejected cost credits and are not in the ledger).
 - No TLS termination, no request-level authentication beyond the bearer token, no per-tenant quotas.
 - Vendor terms of service, data-provenance and consent obligations for the target regions (including your vendors as subprocessors) have not been reviewed.

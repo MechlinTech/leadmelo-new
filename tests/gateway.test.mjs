@@ -113,9 +113,12 @@ function vendors(opts = {}) {
   return v;
 }
 async function start(fetcher, overrides = {}) {
+  // The default fixture is a tenants file: a non-empty allow-list, which must keep self-registration
+  // off. The self-registration tests below override this to an empty map explicitly.
+  const tenants = new Map([[sha(BEARER), { tenantId: 't1', apolloKey: 'apollo-key-123', hunterKey: 'hunter-key-123' }], [sha(OTHER_BEARER), { tenantId: 't2', apolloKey: 'apollo-key-456' }], [sha(NO_APOLLO), { tenantId: 't3' }]]);
   const config = {
-    tenants: new Map([[sha(BEARER), { tenantId: 't1', apolloKey: 'apollo-key-123', hunterKey: 'hunter-key-123' }], [sha(OTHER_BEARER), { tenantId: 't2', apolloKey: 'apollo-key-456' }], [sha(NO_APOLLO), { tenantId: 't3' }]]),
-    taxonomy: { industries: { 'computer software': 'SaaS' }, titles: {} }, syncWaitMs: 5000, discoveryDeadlineMs: 30000, maxEnrichPerRequest: 60, maxPages: 3, dummyDiscovery: false, dummyEmails: [], ...overrides
+    tenants, allowSelfRegistration: tenants.size === 0,
+    taxonomy: { industries: { 'computer software': 'SaaS' }, titles: {} }, syncWaitMs: 5000, discoveryDeadlineMs: 30000, maxEnrichPerRequest: 60, maxPages: 3, ...overrides
   };
   const server = createGatewayServer(config, { fetcher, store: new GatewayStore() });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -254,34 +257,20 @@ test('verification: definitive answers are remembered, UNKNOWN stays retryable, 
   } finally { await g.stop(); }
 });
 
-test('dummy discovery returns configured emails without calling Apollo and still ICP-qualifies', async () => {
-  const v = vendors();
-  const g = await start(v.fetcher, {
-    dummyDiscovery: true,
-    dummyEmails: ['alice.tester@buyer1.example', 'bob.tester@buyer2.example', 'not-an-email', 'alice.tester@buyer1.example']
-  });
+// The synthetic-prospect mode was removed: there is no longer a code path that can return a prospect
+// without Apollo having supplied it. These assertions keep that from creeping back, which would mean
+// outreach built on invented people.
+test('discovery cannot return a prospect the vendors did not supply', async () => {
+  const v = vendors(); const g = await start(v.fetcher);
   try {
-    const r = await discover(NO_APOLLO, 'dummy-key-0001', request('t3', { limit: 10 }));
-    assert.equal(r.prospects.length, 2);
-    assert.deepEqual(r.prospects.map(p => p.email), ['alice.tester@buyer1.example', 'bob.tester@buyer2.example']);
-    assert.equal(v.count('api.apollo.io'), 0, 'Apollo is never called in dummy mode');
-    assert.equal(v.count('api.hunter.io'), 0, 'Hunter is never called in dummy mode');
-    for (const p of r.prospects) {
-      assert.equal(p.verification, 'VALID');
-      assert.equal(p.title, 'CTO');
-      assert.equal(p.industry, 'SaaS');
-      assert.deepEqual(p.signals, ['Hiring QA']);
-      assert.equal(qualifyProspect(icp, p).eligible, true);
-    }
-    // QA intent: dummy mode always returns the same canned prospects on every discover so a
-    // campaign can be re-activated and re-enrolled without rotating inboxes. The gateway-level
-    // "seen" marker must therefore not suppress them.
-    const again = await discover(NO_APOLLO, 'dummy-key-0002', request('t3', { limit: 10 }));
-    assert.deepEqual(again.prospects.map(p => p.email), ['alice.tester@buyer1.example', 'bob.tester@buyer2.example'], 'dummy emails are returned again on a new discover key');
-    // Replaying the same idempotency key must return the identical stored response.
-    const repeat = await discover(NO_APOLLO, 'dummy-key-0001', request('t3', { limit: 10 }));
-    assert.deepEqual(repeat.prospects, r.prospects, 'a repeated idempotency key replays the stored response');
-    assert.equal(v.count('api.apollo.io'), 0, 'Apollo is still never called in dummy mode');
+    // t3 is registered with no Apollo key, so discovery is refused rather than served from nowhere.
+    await assert.rejects(discover(NO_APOLLO, 'nokey-key-0001', request('t3', { limit: 10 })), /gateway_http_409/);
+    assert.equal(v.count('api.apollo.io'), 0, 'nothing was fabricated while refusing');
+
+    // With a key, every returned prospect traces to an Apollo result.
+    const r = await discover(BEARER, 'realkey-0001', request('t1', { limit: 5 }));
+    assert.ok(r.prospects.length > 0);
+    for (const p of r.prospects) assert.match(p.email, /@buyer\d\.example$/, 'only mocked vendor addresses come back');
   } finally { await g.stop(); }
 });
 
@@ -348,5 +337,99 @@ test('PUT /credentials: a tenant writes its own vendor keys using its bearer tok
       assert.equal(body.inMemory, true);
       assert.ok(!('persisted' in body), 'there is no disk persistence to report');
     });
+
+    await t.test('an allow-listed gateway still refuses an unlisted bearer', async () => {
+      // This suite runs against a tenants file, so self-registration is off and an unknown token
+      // must stay a 401. Without the tenants file being load-bearing this test would be the only
+      // thing standing between a stranger and a tenant's vendor credits.
+      assert.equal((await call('GET', 'never-registered-bearer-01')).status, 401);
+      assert.equal((await call('PUT', 'never-registered-bearer-01', { tenantId: 't9', apolloKey: 'apollo-key-123' })).status, 401);
+    });
   } finally { await g.stop(); }
+});
+
+// Without a tenants file there is no allow-list, so a bearer defines its own tenant. These tests pin
+// the two properties that keep that safe enough to run: a stranger cannot take over a tenant ID that
+// is already claimed, and one bearer cannot restate itself as another tenant.
+test('self-registering gateway: the bearer in Settings defines the tenant, no tenants file needed', async t => {
+  const NEW_BEARER = 'brand-new-tenant-bearer-1234', TAKEOVER_BEARER = 'attacker-bearer-token-5678';
+  const startOpen = (fetcher) => start(fetcher, { tenants: new Map(), allowSelfRegistration: true });
+  const call = (g, method, token, path = '/credentials', body) => fetch(`${g.url}${path}`, {
+    method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: body === undefined ? undefined : JSON.stringify(body)
+  });
+
+  await t.test('saving credentials in Settings registers the tenant, with no file to edit', async () => {
+    const v = vendors(); const g = await startOpen(v.fetcher);
+    try {
+      // Nothing is configured; the gateway has never heard of this bearer.
+      assert.equal((await call(g, 'GET', NEW_BEARER)).status, 401);
+      // The very first PUT is the save from Settings. It must both register and store the keys.
+      const res = await call(g, 'PUT', NEW_BEARER, '/credentials', { tenantId: 'fresh-tenant', apolloKey: 'apollo-key-fresh', hunterKey: 'hunter-key-fresh' });
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true, tenantId: 'fresh-tenant', apollo: true, hunter: true, inMemory: true });
+      // And it persists for later calls, so the tenant does not re-register on every request.
+      assert.deepEqual(await (await call(g, 'GET', NEW_BEARER)).json(), { tenantId: 'fresh-tenant', apollo: true, hunter: true, inMemory: true });
+    } finally { await g.stop(); }
+  });
+
+  await t.test('a registered tenant can discover immediately, without any tenants file', async () => {
+    const v = vendors(); const g = await startOpen(v.fetcher);
+    try {
+      await call(g, 'PUT', NEW_BEARER, '/credentials', { tenantId: 'fresh-tenant', apolloKey: 'apollo-key-fresh', hunterKey: 'hunter-key-fresh' });
+      const r = await discover(NEW_BEARER, 'selfreg-key-01', request('fresh-tenant', { limit: 1 }));
+      assert.equal(r.prospects.length, 1, 'the key pushed from Settings is the key discovery uses');
+    } finally { await g.stop(); }
+  });
+
+  await t.test('a second bearer cannot claim a tenant ID that is already taken', async () => {
+    const v = vendors(); const g = await startOpen(v.fetcher);
+    try {
+      await call(g, 'PUT', NEW_BEARER, '/credentials', { tenantId: 'fresh-tenant', apolloKey: 'apollo-key-fresh' });
+      // First-claim-wins: the stranger is refused instead of being handed the tenant's data.
+      const res = await call(g, 'PUT', TAKEOVER_BEARER, '/credentials', { tenantId: 'fresh-tenant', apolloKey: 'apollo-key-stolen' });
+      assert.equal(res.status, 409);
+      assert.match((await res.json()).error, /already_registered/);
+      // The real tenant is untouched.
+      assert.deepEqual(await (await call(g, 'GET', NEW_BEARER)).json(), { tenantId: 'fresh-tenant', apollo: true, hunter: false, inMemory: true });
+    } finally { await g.stop(); }
+  });
+
+  await t.test('one bearer cannot restate itself as a different tenant', async () => {
+    const v = vendors(); const g = await startOpen(v.fetcher);
+    try {
+      await call(g, 'PUT', NEW_BEARER, '/credentials', { tenantId: 'fresh-tenant', apolloKey: 'apollo-key-fresh' });
+      // The pinning that stops a leaked bearer being re-aimed at another tenant.
+      assert.equal((await call(g, 'PUT', NEW_BEARER, '/credentials', { tenantId: 'somebody-else', apolloKey: 'apollo-key-1234' })).status, 403);
+      assert.equal((await call(g, 'PUT', NEW_BEARER, '/credentials', { tenantId: 'fresh-tenant', apolloKey: 'apollo-key-1234' })).status, 200, 'its own tenant ID is still accepted');
+    } finally { await g.stop(); }
+  });
+
+  await t.test('a request with no tenantId cannot register, and says why', async () => {
+    const v = vendors(); const g = await startOpen(v.fetcher);
+    try {
+      // Nothing to claim, so there is no identity to bind and the caller is refused.
+      const res = await call(g, 'PUT', NEW_BEARER, '/credentials', { apolloKey: 'apollo-key-fresh' });
+      assert.equal(res.status, 401);
+      assert.match((await res.json()).error, /tenantId/, 'the error must name the missing field rather than saying "bad token"');
+    } finally { await g.stop(); }
+  });
+
+  await t.test('a no-body or unreadable request is refused, never crashed on', async () => {
+    const v = vendors(); const g = await startOpen(v.fetcher);
+    try {
+      assert.equal((await call(g, 'PUT', NEW_BEARER, '/credentials', undefined)).status, 401);
+      assert.equal((await fetch(`${g.url}/credentials`, { method: 'PUT', headers: { Authorization: `Bearer ${NEW_BEARER}`, 'Content-Type': 'application/json' }, body: 'not json' })).status, 400);
+      assert.equal((await call(g, 'GET')).status, 401, 'no bearer at all is still refused');
+    } finally { await g.stop(); }
+  });
+
+  await t.test('registration is logged without the bearer, so the audit trail is usable', async () => {
+    const logs = []; const realLog = console.log; console.log = (...a) => logs.push(a.join(' '));
+    const v = vendors(); const g = await startOpen(v.fetcher);
+    try {
+      await call(g, 'PUT', NEW_BEARER, '/credentials', { tenantId: 'fresh-tenant', apolloKey: 'apollo-key-fresh' });
+      assert.ok(logs.some(l => /tenant_registered/.test(l)), 'the new tenant is recorded');
+      assert.ok(!logs.some(l => l.includes(NEW_BEARER) || /apollo-key/.test(l)), 'no credential is logged');
+    } finally { console.log = realLog; await g.stop(); }
+  });
 });

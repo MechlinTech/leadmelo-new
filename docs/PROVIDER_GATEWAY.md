@@ -4,6 +4,12 @@ The application includes a gateway **client** and a test simulator. `gateway/` (
 
 The gateway belongs to the deployment operator. `PROVIDER_GATEWAY_URL` is an operator-controlled HTTPS URL, never an arbitrary tenant-provided URL. Tenant credentials in Settings are encrypted. The gateway must bind each credential to exactly one tenant, authorize connected senders and calendars, and reject a tenant ID that differs from that binding. TLS verification and redirects are not disabled. Put quotas and monetary spend limits in the gateway before buying data or sending messages.
 
+## Tenant registration
+
+Tenants are defined by the bearer token saved in Settings, which also delivers their vendor keys over `PUT /credentials`; there is no tenants file to maintain. A gateway that does not keep an allow-list (`GATEWAY_TENANTS_FILE` unset, which is what the shipped compose file does) therefore admits **any caller who can reach it**, so it must not be exposed beyond loopback or the private network. Set `GATEWAY_TENANTS_FILE` to a non-empty file to switch the gateway to a closed allow-list; that turns self-registration off rather than merely seeding it.
+
+Either way the gateway must enforce: **first-claim-wins** (the first bearer to claim a tenant ID keeps it; another bearer claiming the same ID is refused) and **one bearer, one tenant** (a bearer restating itself as a different tenant ID is refused with 403). Without both, self-registration lets one tenant impersonate or take over another.
+
 ## Discovery
 
 `POST {gateway}/discover` has `Authorization: Bearer <tenant key>`, `Idempotency-Key`, and JSON `{tenantId,campaignId,icp,limit}`. `limit` is 0-100, with aggregate campaign/tenant admission caps in LeadMelo. The gateway must discover accounts, enrich appropriate buyers and verify mailboxes. Return at most the requested limit:
@@ -14,7 +20,7 @@ The gateway belongs to the deployment operator. `PROVIDER_GATEWAY_URL` is an ope
 
 Return only known information, source evidence and independently verified email status. The example is synthetic. Normalize values to the selected ICP taxonomy; never change a prospect's actual attributes to force a match. Invalid/risky/unknown, stale, excluded and mismatched prospects do not enter sequences. Natural-language exclusions require explicit implementation beyond the current exact-match filter. Evidence freshness and provenance validation remain a provider responsibility.
 
-For local/dev testing without Apollo credits, the reference gateway supports `GATEWAY_DUMMY_DISCOVERY=true` with `GATEWAY_DUMMY_EMAILS` (comma-separated). Each email becomes one ICP-aligned `VALID` prospect; Apollo and Hunter are not called. See `gateway/README.md`.
+Discovery always calls the real vendors. There is no synthetic-prospect mode: exercising the campaign path without spending credits means pointing `PROVIDER_GATEWAY_URL` at a stub that returns the contract's JSON, as `tests/integration/` does.
 
 ## Reverification
 

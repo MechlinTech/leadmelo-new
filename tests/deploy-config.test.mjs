@@ -40,10 +40,15 @@ test('secret separation: web and worker never see the database owner password; t
   assert.match(env('migrate').DATABASE_URL, /postgresql:\/\/leadmelo:\$\{POSTGRES_PASSWORD\}/, 'only the migration service uses the owner');
   const gw = env('gateway');
   for (const forbidden of ['DATABASE_URL', 'SESSION_SECRET', 'DATA_ENCRYPTION_KEY', 'POSTGRES_PASSWORD', 'APP_DB_PASSWORD', 'ALERT_WEBHOOK_SECRET']) assert.ok(!(forbidden in gw), `gateway must not receive ${forbidden}`);
-  assert.equal(gw.GATEWAY_TENANTS_FILE, '/etc/leadmelo-gateway/tenants.json');
+  // No GATEWAY_TENANTS_FILE on purpose: tenants and their vendor keys come from Settings, so there is
+  // no file to hold secrets. The gateway must therefore stay off the published interface, because
+  // without an allow-list anyone who can reach it can register a tenant.
+  assert.ok(!('GATEWAY_TENANTS_FILE' in gw), 'no tenants file: the gateway must not be given one to read');
   const mounts = svc.gateway.volumes.map(String);
-  assert.ok(mounts.some(m => /:\/etc\/leadmelo-gateway:ro$/.test(m)), 'vendor keys are mounted read-only');
+  assert.ok(mounts.some(m => /:\/etc\/leadmelo-gateway:ro$/.test(m)), 'the config directory is mounted read-only');
   assert.equal(svc.gateway.read_only, true);
+  const gwPorts = svc.gateway.ports.map(String);
+  assert.ok(gwPorts.every(p => /^127\.0\.0\.1:/.test(p)), `a self-registering gateway must not be published off-host: ${gwPorts}`);
 });
 
 test('every compose variable is documented in .env.example, and versions agree everywhere', () => {

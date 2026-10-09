@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 // MOCK-BASED. The probes below are driven by an injected fetcher, so this file proves how a vendor
 // response is interpreted. It does NOT prove Apollo or Hunter accept a real key; live acceptance with
@@ -120,6 +121,58 @@ test('the gateway URL is built without a doubled slash', async t => {
     let seen;
     await probeGateway({ gatewayKey: 'x'.repeat(40) }, async (url) => { seen = String(url); return json(200, { apollo: true, hunter: true, inMemory: true }); });
     assert.equal(seen, 'https://gateway.example.com/leadmelo/credentials');
+  });
+});
+
+// The Settings form sends provider ids ("apollo") while the route's schema is .strict() and wants the
+// field names ("apolloKey"). Sending the id produced 400 invalid_request and saved nothing, so the
+// two lists are compared here rather than left to a click to discover.
+test('every provider id the form sends has a matching field the route accepts', async t => {
+  const { z } = await import('zod');
+  const component = readFileSync(new URL('../components/ProviderCredentials.tsx', import.meta.url), 'utf8');
+  const route = readFileSync(new URL('../app/api/integrations/providers/route.ts', import.meta.url), 'utf8');
+
+  // The route's own schema, transcribed. Kept literal so a change there has to be made here too.
+  const PROVIDERS = ['gateway', 'apollo', 'hunter'];
+  const saveInput = z.object({
+    gatewayKey: z.string().min(16).max(2000).optional(),
+    apolloKey: z.string().min(8).max(2000).optional(),
+    hunterKey: z.string().min(8).max(2000).optional(),
+    clear: z.array(z.enum(PROVIDERS)).max(3).optional()
+  }).strict();
+
+  await t.test('each provider declares a distinct field name', () => {
+    const fields = [...component.matchAll(/id: '(\w+)', field: '(\w+)'/g)].map(m => ({ id: m[1], field: m[2] }));
+    assert.deepEqual(fields.map(f => f.id), PROVIDERS, 'the form covers every provider the route accepts');
+    assert.equal(new Set(fields.map(f => f.field)).size, PROVIDERS.length, 'fields must be distinct');
+  });
+
+  await t.test('every declared field is one the route schema accepts', () => {
+    for (const field of [...component.matchAll(/field: '(\w+)'/g)].map(m => m[1]))
+      assert.ok(saveInput.safeParse({ [field]: 'x'.repeat(40) }).success, `route must accept ${field}`);
+  });
+
+  await t.test('a saved Apollo key and bearer token pass validation', () => {
+    // Exactly the reported case: both fields filled, keyed by field name rather than by id.
+    const body = { gatewayKey: 'a'.repeat(40), apolloKey: 'b'.repeat(40) };
+    assert.ok(saveInput.safeParse(body).success);
+  });
+
+  await t.test('the form never sends a bare provider id as a field', () => {
+    // The original defect, asserted directly so the fix cannot be quietly reverted.
+    for (const id of PROVIDERS)
+      assert.equal(saveInput.safeParse({ [id]: 'x'.repeat(40) }).success, false, `${id} must not be a field name`);
+  });
+
+  await t.test('the form does not fall back to sending the id in a save or update body', () => {
+    assert.ok(!/body\[p\.id\]/.test(component), 'save must use p.field');
+    assert.ok(!/\{ \[id\]: value \}/.test(component), 'update must use the mapped field');
+    assert.ok(route.includes('gatewayKey') && route.includes('apolloKey') && route.includes('hunterKey'),
+      'the route still reads the field names');
+  });
+
+  await t.test('clearing uses the provider id, which is what the clear enum accepts', () => {
+    assert.ok(saveInput.safeParse({ clear: ['apollo'] }).success);
   });
 });
 

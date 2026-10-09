@@ -11,11 +11,15 @@ type Status = {
   gatewaySynced: boolean | null;
 };
 type Verdict = { provider: string; ok: boolean; code: string; detail: string };
+// `id` drives the per-provider buttons and the `${id}Configured` status flags; `field` is the key the
+// PUT body must use. They are not the same string, and the route's schema is .strict(), so sending
+// the id produced 400 invalid_request and nothing ever saved.
 const PROVIDERS = [
-  { id: 'gateway', label: 'Bearer token', hint: 'Identifies this workspace to the provider gateway. One is generated for you and must also be registered in the gateway’s tenants file.' },
-  { id: 'apollo', label: 'Apollo API key', hint: 'Used for prospect discovery. From Apollo → Settings → API Keys.' },
-  { id: 'hunter', label: 'Hunter API key', hint: 'Used to verify prospect email addresses. From Hunter → Settings → API Key.' }
+  { id: 'gateway', field: 'gatewayKey', label: 'Bearer token', hint: 'Identifies this workspace to the provider gateway. Generate a long random token and paste it here; saving registers this workspace with the gateway automatically, so there is no tenants file to edit.' },
+  { id: 'apollo', field: 'apolloKey', label: 'Apollo API key', hint: 'Used for prospect discovery. From Apollo → Settings → API Keys.' },
+  { id: 'hunter', field: 'hunterKey', label: 'Hunter API key', hint: 'Used to verify prospect email addresses. From Hunter → Settings → API Key.' }
 ] as const;
+const FIELD: Record<string, string> = Object.fromEntries(PROVIDERS.map(p => [p.id, p.field]));
 
 export default function ProviderCredentials() {
   const [status, setStatus] = useState<Status | null>(null), [values, setValues] = useState<Record<string, string>>({}), [busy, setBusy] = useState('');
@@ -30,7 +34,7 @@ export default function ProviderCredentials() {
     setBusy('save'); setError(''); setVerdicts({});
     try {
       const body: Record<string, unknown> = {};
-      for (const p of PROVIDERS) if (values[p.id]?.trim()) body[p.id] = values[p.id].trim();
+      for (const p of PROVIDERS) if (values[p.id]?.trim()) body[p.field] = values[p.id].trim();
       const r = await api<Status & { saved: boolean; gatewaySyncError: string | null }>('integrations/providers', 'PUT', body);
       setValues({});
       setStatus({ ...r });
@@ -45,7 +49,7 @@ export default function ProviderCredentials() {
     if (!value) { setError(`Enter a new ${PROVIDERS.find(p => p.id === id)?.label.toLowerCase()} first.`); return; }
     setBusy(id); setError('');
     try {
-      const r = await api<Status & { gatewaySyncError: string | null }>('integrations/providers', 'PUT', { [id]: value });
+      const r = await api<Status & { gatewaySyncError: string | null }>('integrations/providers', 'PUT', { [FIELD[id]]: value });
       setValues(v => ({ ...v, [id]: '' }));
       setStatus({ ...r });
       setVerdicts(v => ({ ...v, [id]: { provider: id, ok: true, code: 'saved', detail: 'Saved and sent to the gateway.' } }));

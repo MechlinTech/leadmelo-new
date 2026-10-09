@@ -92,7 +92,7 @@ export const POST = endpoint(async req => {
   const stored = provider === 'apollo' ? secrets.apolloKey : provider === 'hunter' ? secrets.hunterKey : secrets.gatewayKey;
   if (!stored)
     return Response.json({ provider: provider as ProviderName, ok: false, code: 'provider_credential_missing', detail: `No ${provider} credential is saved for this workspace yet.` }, { status: 409 });
-  const result = provider === 'apollo' ? await probeApollo(stored) : provider === 'hunter' ? await probeHunter(stored) : await probeGateway(secrets);
+  const result = provider === 'apollo' ? await probeApollo(stored) : provider === 'hunter' ? await probeHunter(stored) : await probeGateway(secrets, fetch, user.tenantId);
   await db.auditEvent.create({ data: { tenantId: user.tenantId, actorUserId: user.id, action: 'provider_credential_tested', entity: provider } });
   return Response.json({ provider: provider as ProviderName, ...result });
 });

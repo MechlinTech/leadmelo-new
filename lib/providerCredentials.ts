@@ -104,7 +104,10 @@ export async function pushCredentialsToGateway(tenantId: string, secrets?: Provi
     res = await fetch(url, {
       method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(10000),
       headers: { Authorization: `Bearer ${s.gatewayKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apolloKey: s.apolloKey ?? null, hunterKey: s.hunterKey ?? null })
+      // tenantId is what registers this bearer on a gateway running without a tenants file, so it
+      // must go on this request: on a fresh deployment this save is the first contact the gateway
+      // ever has with the tenant.
+      body: JSON.stringify({ tenantId, apolloKey: s.apolloKey ?? null, hunterKey: s.hunterKey ?? null })
     });
   } catch {
     throw new HttpError(502, 'gateway_unreachable');
@@ -125,6 +128,9 @@ export async function gatewayCredentialState(tenantId: string, secrets?: Provide
   try {
     const url = gatewayBase();
     url.pathname = gatewayPath(url, '/credentials');
+    // As in probeGateway: tenantId is a query parameter because this is a GET, and it registers the
+    // bearer on a gateway that has no tenants file.
+    url.searchParams.set('tenantId', tenantId);
     const res = await fetch(url, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Authorization: `Bearer ${s.gatewayKey}` } });
     if (!res.ok) return null;
     const body = await res.json().catch(() => ({}));
@@ -193,13 +199,17 @@ export async function probeHunter(apiKey: string, fetcher: typeof fetch = fetch)
  * meaningful check is an authenticated request: a 401 means the token is not in the gateway's
  * tenants file, which is the one thing still configured out of band.
  */
-export async function probeGateway(secrets: ProviderSecrets, fetcher: typeof fetch = fetch): Promise<ProbeResult> {
+export async function probeGateway(secrets: ProviderSecrets, fetcher: typeof fetch = fetch, tenantId?: string): Promise<ProbeResult> {
   if (!secrets.gatewayKey) return { ok: false, code: 'gateway_credential_missing', detail: 'No bearer token is saved for this workspace yet.' };
   try {
     const url = gatewayBase();
     url.pathname = gatewayPath(url, '/credentials');
-    const res = await fetcher(url, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Authorization: `Bearer ${secrets.gatewayKey}` } });
-    if (res.status === 401) return { ok: false, code: 'gateway_http_401', detail: 'The gateway does not recognise this bearer token. Its tenants file must contain this token’s SHA-256 bound to this workspace.' };
+    // tenantId is sent as a query parameter because a GET carries no body. It only matters on a gateway
+    // running without a tenants file, where this GET is what registers the bearer.
+    const probeUrl = new URL(url);
+    if (tenantId) probeUrl.searchParams.set('tenantId', tenantId);
+    const res = await fetcher(probeUrl, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(8000), headers: { Authorization: `Bearer ${secrets.gatewayKey}` } });
+    if (res.status === 401) return { ok: false, code: 'gateway_http_401', detail: 'The gateway does not recognise this bearer token yet. Save the credentials again to register this workspace, or add the token’s SHA-256 to the gateway tenants file.' };
     if (res.status === 404) return { ok: false, code: 'gateway_credentials_unsupported', detail: 'This gateway build has no credential endpoint. Restart it on a version that supports PUT /credentials.' };
     if (!res.ok) return { ok: false, code: 'vendor_error', detail: `The gateway returned HTTP ${res.status}.` };
     return { ok: true, code: 'gateway_auth_ok', detail: 'The gateway accepted this bearer token.' };
