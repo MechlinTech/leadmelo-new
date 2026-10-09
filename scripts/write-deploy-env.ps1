@@ -67,7 +67,7 @@ foreach ($key in @(
   'APP_URL', 'HOST_PORT', 'COMPOSE_PROJECT_NAME', 'POSTGRES_DB',
   'POSTGRES_PASSWORD', 'APP_DB_PASSWORD', 'SESSION_SECRET', 'DATA_ENCRYPTION_KEY',
   'PROVIDER_GATEWAY_URL', 'ALERT_WEBHOOK_URL', 'ALERT_WEBHOOK_SECRET',
-  'GATEWAY_CONFIG_DIR', 'OUTBOUND_ENABLED', 'PLAN_ENFORCEMENT', 'SENDER_HEALTH_AUTO',
+  'GATEWAY_CONFIG_DIR', 'GATEWAY_HOST_PORT', 'OUTBOUND_ENABLED', 'PLAN_ENFORCEMENT', 'SENDER_HEALTH_AUTO',
   'AI_ALLOWED_HOSTS', 'AI_DAILY_LIMIT', 'PLATFORM_MAIL_TENANT_ID'
 )) {
   if ($hostEnv.Contains($key) -and $hostEnv[$key]) { $map[$key] = $hostEnv[$key] }
@@ -79,6 +79,24 @@ foreach ($key in @('POSTGRES_PASSWORD', 'APP_DB_PASSWORD', 'SESSION_SECRET', 'DA
 
 $map['RELEASE_TAG'] = $ReleaseTag.Trim()
 $map['NODE_ENV'] = 'production'
+
+# The bundled gateway lives in this same compose project, so when one is configured its address is
+# knowable without being told. Defaulting it here matters because an empty value is dropped from the
+# generated file (see the copy loop above), which left the app with no PROVIDER_GATEWAY_URL at all:
+# compose then passed an empty string, every credential save reported "the gateway could not be
+# reached", and nothing named the missing variable. An operator who genuinely runs no gateway sets
+# PROVIDER_GATEWAY_URL= explicitly, and this guard below lets them say so.
+if (-not $map['PROVIDER_GATEWAY_URL']) {
+  if ([Environment]::GetEnvironmentVariable('LEADMELO_NO_GATEWAY') -match '^(1|true|yes|on)$') {
+    Write-Host 'PROVIDER_GATEWAY_URL not set and LEADMELO_NO_GATEWAY is on: deploying without the bundled gateway'
+  } else {
+    $map['PROVIDER_GATEWAY_URL'] = 'http://gateway:8788'
+    Write-Host 'PROVIDER_GATEWAY_URL was not set; defaulting to the bundled gateway at http://gateway:8788'
+  }
+}
+# Dev and prod share a machine, so the gateway's published host port must differ per deployment or
+# the second one fails to bind. The in-network port stays 8788.
+if (-not $map['GATEWAY_HOST_PORT']) { $map['GATEWAY_HOST_PORT'] = if ($Environment -eq 'production') { '8789' } else { '8788' } }
 if (-not $map['GATEWAY_CONFIG_DIR']) { $map['GATEWAY_CONFIG_DIR'] = './gateway-config' }
 if (-not $map['OUTBOUND_ENABLED']) { $map['OUTBOUND_ENABLED'] = 'false' }
 if (-not $map['PLAN_ENFORCEMENT']) { $map['PLAN_ENFORCEMENT'] = 'off' }

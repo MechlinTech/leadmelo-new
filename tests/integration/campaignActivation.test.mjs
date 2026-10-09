@@ -69,4 +69,34 @@ test('an unhealthy sender blocks sending but no longer blocks activation', async
     await assert.rejects(campaignReady(tenant.id, bare.id, { allowUnhealthySender: true }), /campaign_not_ready:[a-z_,]*postal_address/);
     await db.tenantSetting.update({ where: { tenantId: tenant.id }, data: { postalAddress: '221B Test Street' } });
   });
+
+  // automationEnabled defaults to false, so treating it as a blocker meant a new workspace could
+  // never activate its first campaign: a 409 saying "tenant automation is off" with no way forward
+  // from the campaigns page. It is a warning now, and the worker still refuses to send.
+  await t.test('tenant automation off warns instead of blocking activation', async () => {
+    await db.tenantSetting.update({ where: { tenantId: tenant.id }, data: { automationEnabled: false } });
+    const admin = await db.user.findFirstOrThrow({ where: { tenantId: tenant.id } });
+    const cookie = `${sessionCookie}=${await createSession(admin.id)}`;
+    const draft = await db.campaign.create({
+      data: { tenantId: tenant.id, icpId: icp.id, name: 'Automation off campaign', senderName: 'S', senderEmail, calendlyUrl: 'https://calendly.com/test', status: 'DRAFT', automationMode: 'FULLY_AUTOMATIC', sequenceSteps: { create: [{ stepOrder: 1, subject: 'Hi', body: 'Hi {{firstName}}' }] } }
+    });
+    const res = await patchCampaign(new Request('http://localhost:3000/api/campaigns', {
+      method: 'PATCH', headers: { cookie, origin: 'http://localhost:3000', 'content-type': 'application/json' },
+      body: JSON.stringify({ id: draft.id, status: 'ACTIVE' })
+    }));
+    assert.equal(res.status, 200, 'Activate must not 409 on a setting the operator can change in Settings');
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.ok(body.warnings.includes('tenant_automation_enabled'), 'but the operator is told sending is held back');
+    assert.equal((await db.campaign.findUniqueOrThrow({ where: { id: draft.id } })).status, 'ACTIVE');
+  });
+
+  await t.test('a campaign with automation off is never scheduled to run', async () => {
+    // The warning must not cost safety: the worker is what actually stops the send.
+    const { scheduleRuns } = await import('../../lib/worker.ts');
+    await db.tenantSetting.update({ where: { tenantId: tenant.id }, data: { automationEnabled: false } });
+    const runs = await db.automationRun.count({ where: { campaign: { tenantId: tenant.id }, status: { in: ['QUEUED', 'RUNNING'] } } });
+    await scheduleRuns();
+    assert.equal(await db.automationRun.count({ where: { campaign: { tenantId: tenant.id }, status: { in: ['QUEUED', 'RUNNING'] } } }), runs, 'an automation-off tenant gets no runs queued');
+  });
 });
