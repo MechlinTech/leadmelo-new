@@ -16,3 +16,6 @@ coverage/
 scripts/_*
 # Per-environment gateway tenant bindings and vendor keys. Never shared.
 gateway-config/
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat

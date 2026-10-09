@@ -13,6 +13,13 @@ async function main() {
   await db.$executeRawUnsafe('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO leadmelo_app');
   await db.$executeRawUnsafe('REVOKE ALL ON TABLE "_prisma_migrations" FROM leadmelo_app');
   await db.$executeRawUnsafe('REVOKE CREATE ON SCHEMA public FROM PUBLIC');
-  console.log('Runtime database role configured');
 }
-main().catch(() => { console.error('Database role provisioning failed'); process.exitCode = 1; }).finally(() => db.$disconnect());
+// Print the underlying error. Without it a failed provision is just "Database role provisioning failed"
+// and deploy.ps1 cannot tell a missing role from a bad password or a revoked grant.
+main()
+  .then(() => console.log('Runtime database role configured'))
+  .catch((error) => {
+    console.error('Database role provisioning failed:', error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  })
+  .finally(() => db.$disconnect());
