@@ -87,6 +87,11 @@ for (const file of files) {
   const ext = path.extname(file).toLowerCase();
   const size = info.size;
 
+  // The scanner necessarily contains the signatures and forbidden API names it
+  // looks for. Skip only its own content checks; its filename and package-script
+  // checks still apply, and CI runs this exact file before installing anything.
+  if (normalized === 'scripts/security-scan.mjs') continue;
+
   // Signature scanning works on binary-ish files too, because the previous
   // loader was stored as a text file with an .otf extension.
   if (size <= 8 * 1024 * 1024) {
