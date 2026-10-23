@@ -97,6 +97,9 @@ services:
       # which is also how its Apollo and Hunter keys arrive, so there is no file to hand-edit.
       # Setting this path back to /etc/leadmelo-gateway/tenants.json restores a closed allow-list,
       # where only bearers listed in that file are accepted.
+      # The file is optional: a missing one starts with built-in title mappings and a warning.
+      # scripts/deploy.ps1 creates an empty editable file when the host config directory has none.
+      # A malformed file stops startup instead of silently changing qualification.
       GATEWAY_TAXONOMY_FILE: /etc/leadmelo-gateway/taxonomy.json
       GATEWAY_STORE_FILE: /var/lib/leadmelo-gateway/store.jsonl
     # Host port is per-deployment: dev and prod run side by side on one host, and a fixed 8788 made

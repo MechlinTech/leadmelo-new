@@ -8,6 +8,7 @@ import { unsubscribeToken } from '../../../lib/unsubscribe';
 import { schedulingUrl } from '../../../lib/calendly';
 import { pickVariant, previewVariant } from '../../../lib/experiments';
 import { renderOutreachContent } from '../../../lib/outreachContent';
+import { emailBodyContentType } from '../../../lib/m365/graph';
 
 type ReviewEvent = Prisma.OutreachEventGetPayload<{ include: { campaign: { include: { sequenceSteps: true } }; contact: { include: { lead: true } } } }>;
 
@@ -49,12 +50,14 @@ export const GET = endpoint(async req => {
   const user = await authenticate(req);
   const events = await db.outreachEvent.findMany({ where: { tenantId: user.tenantId }, include: { contact: { include: { lead: true } }, campaign: { include: { sequenceSteps: true } } }, orderBy: { createdAt: 'desc' }, take: 100 });
   const rows = await Promise.all(events.map(async event => {
-    if (event.status !== 'QUEUED') return event;
+    // Sent and failed rows already carry their final stored content. Report the
+    // content type too, so the queue can render HTML safely instead of showing tags.
+    if (event.status !== 'QUEUED') return { ...event, previewContentType: emailBodyContentType(event.body ?? '') };
     try {
       const preview = await db.$transaction(tx => reviewContent(tx, event, false));
-      return { ...event, reviewSubject: preview.subject, reviewBody: preview.body, reviewContentType: preview.contentType, reviewToken: preview.reviewToken, statusLabel: event.approvedAt ? 'APPROVED' : event.status };
+      return { ...event, previewContentType: preview.contentType, reviewSubject: preview.subject, reviewBody: preview.body, reviewContentType: preview.contentType, reviewToken: preview.reviewToken, statusLabel: event.approvedAt ? 'APPROVED' : event.status };
     } catch (error) {
-      return { ...event, reviewError: error instanceof Error ? error.message : 'review_message_unavailable' };
+      return { ...event, previewContentType: emailBodyContentType(event.body ?? ''), reviewError: error instanceof Error ? error.message : 'review_message_unavailable' };
     }
   }));
   return Response.json(rows);

@@ -56,6 +56,27 @@ function Show-Logs([string[]]$ComposeArgs) {
   try { & docker @compose @ComposeArgs 2>&1 | ForEach-Object { Write-Host $_ } } finally { $ErrorActionPreference = $pref }
 }
 
+# The gateway mounts this directory read-only and names taxonomy.json unconditionally. A missing file
+# used to make loadConfig() throw ENOENT before the HTTP server started, so the container was
+# unhealthy and the deployment failed. Create a valid, empty, operator-editable file when the host
+# has none. Empty mappings are a safe fallback; malformed mappings are left for the gateway's own
+# validation to reject loudly instead of being silently replaced.
+function Ensure-GatewayTaxonomy {
+  $configured = if ($env:GATEWAY_CONFIG_DIR) { $env:GATEWAY_CONFIG_DIR } else { './gateway-config' }
+  $dir = if ([IO.Path]::IsPathRooted($configured)) { $configured } else { Join-Path (Get-Location) $configured }
+  if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  $file = Join-Path $dir 'taxonomy.json'
+  if (Test-Path -LiteralPath $file) {
+    try { Get-Content -LiteralPath $file -Raw | ConvertFrom-Json | Out-Null }
+    catch { throw "Gateway taxonomy file $file is not valid JSON: $($_.Exception.Message)" }
+    return
+  }
+  $template = Join-Path (Get-Location) 'gateway/taxonomy.empty.json'
+  if (-not (Test-Path -LiteralPath $template)) { throw "Missing gateway taxonomy template $template" }
+  Copy-Item -LiteralPath $template -Destination $file
+  Write-Host "Created $file with empty taxonomy mappings. Add operator-approved vendor-to-ICP mappings when needed."
+}
+
 # Leave the existing database volume running. Recreate only the app containers so the new image replaces what is listening.
 Invoke-Compose @('up', '-d', '--build', '--no-recreate', 'postgres')
 
@@ -102,6 +123,7 @@ Invoke-Compose @('up', '-d', '--build', '--force-recreate', '--no-deps', 'web', 
 # had configured it. When the deployment names a gateway, start it as part of the same release.
 # Skipped when PROVIDER_GATEWAY_URL is empty, which is how a deployment says it uses no gateway.
 if ($env:PROVIDER_GATEWAY_URL -and $env:PROVIDER_GATEWAY_URL.Trim()) {
+  Ensure-GatewayTaxonomy
   Invoke-Compose @('--profile', 'gateway', 'up', '-d', '--build', '--force-recreate', '--no-deps', 'gateway')
   # /health is unauthenticated, so this proves the service is actually answering before anyone
   # spends a round trip finding out from a failed credential save.

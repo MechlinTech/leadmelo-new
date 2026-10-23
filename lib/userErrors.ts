@@ -83,6 +83,9 @@ const MESSAGES: Record<string, string> = {
   suppressed_before_send: 'This message was canceled because the recipient unsubscribed or bounced before it could be sent.',
   daily_cap: 'Daily email cap reached for this campaign or tenant. Sending will resume in the next send window.',
   postal_address_missing: 'The business postal address is missing in Settings.',
+  review_message_unavailable: 'This message preview is unavailable because its recipient, campaign or email step is missing.',
+  unknown_template_variable: 'This message uses a placeholder that is not supported. Use only {{firstName}}, {{company}}, {{offer}}, {{senderName}} and {{calendlyUrl}}.',
+  unresolved_template_variable: 'This message still contains an unresolved placeholder, so it is not safe to preview or send. Update the email step and reload the queue.',
   reverification_required: 'The contact’s email verification is missing or older than 7 days.'
 };
 

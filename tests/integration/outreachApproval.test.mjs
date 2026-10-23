@@ -33,6 +33,12 @@ test('approving a queued message from the outreach queue', async t => {
       sequenceSteps: { create: [{ stepOrder: 1, waitBusinessDays: 0, subject: 'Question for {{firstName}}', body: 'Hi {{firstName}},\n\nQuestion about {{company}}.\n\n{{calendlyUrl}}' }] }
     }
   });
+  await db.sequenceStep.create({
+    data: {
+      campaignId: campaign.id, stepOrder: 2, waitBusinessDays: 1, subject: 'HTML for {{firstName}}',
+      body: '<p>Hi {{firstName}} at {{company}}</p><a href="{{calendlyUrl}}">Book a time</a>'
+    }
+  });
   await db.enrollment.create({ data: { tenantId: tenant.id, campaignId: campaign.id, contactId: contact.id, score: 90, hasBuyer: true, hasPainSignal: true, evidence: { synthetic: true } } });
 
   const admin = await db.user.findFirstOrThrow({ where: { tenantId: tenant.id } });
@@ -54,6 +60,63 @@ test('approving a queued message from the outreach queue', async t => {
     assert.equal(row.reviewSubject, 'Question for Pat');
     assert.match(row.reviewBody, /Hi Pat,/);
     assert.equal(row.reviewError, undefined, 'the preview renders without an error');
+  });
+
+  await t.test('every recipient gets their own resolved values, including a missing optional company', async () => {
+    const recipients = [
+      { name: 'Ada Lovelace', company: 'Analytical Engines' },
+      { name: 'Grace Hopper', company: 'Navy Systems' },
+      { name: 'Solo', company: null }
+    ];
+    for (const recipient of recipients) {
+      const lead = recipient.company
+        ? await db.lead.create({ data: { tenantId: tenant.id, company: recipient.company, domain: `lead-${randomUUID()}.example` } })
+        : null;
+      const person = await db.contact.create({
+        data: {
+          tenantId: tenant.id, leadId: lead?.id ?? null, fullName: recipient.name,
+          email: `person-${randomUUID()}@acme.example`, verification: 'VALID', lastVerifiedAt: new Date()
+        }
+      });
+      const event = await db.outreachEvent.create({
+        data: {
+          tenantId: tenant.id, campaignId: campaign.id, contactId: person.id, leadId: lead?.id ?? null,
+          stepOrder: 1, idempotencyKey: `preview-${randomUUID()}`, scheduledAt: new Date()
+        }
+      });
+      const row = await queueRow(event.id);
+      const firstName = recipient.name.split(/\s+/)[0];
+      assert.equal(row.reviewError, undefined);
+      assert.equal(row.previewContentType, 'Text');
+      assert.equal(row.reviewSubject, `Question for ${firstName}`);
+      assert.match(row.reviewBody, new RegExp(`Hi ${firstName},`));
+      if (recipient.company) assert.match(row.reviewBody, new RegExp(recipient.company));
+      assert.doesNotMatch(row.reviewBody, /\{\{|\}\}/, 'no placeholder reaches the queue');
+      assert.match(row.reviewBody, /https:\/\/calendly\.com\/sam\/30min\?utm_source=leadmelo&utm_content=/, 'the signed scheduling link is resolved');
+      assert.match(row.reviewBody, /221B Test Street\nUnsubscribe: https:\/\/leadmelo\.example\.com\/unsubscribe\?token=/, 'the final footer is part of the preview');
+    }
+  });
+
+  await t.test('HTML copy is marked as HTML and resolves values without exposing placeholders', async () => {
+    const lead = await db.lead.create({ data: { tenantId: tenant.id, company: 'Acme & Co', domain: `html-${randomUUID()}.example` } });
+    const person = await db.contact.create({
+      data: { tenantId: tenant.id, leadId: lead.id, fullName: 'Ada Lovelace', email: `html-${randomUUID()}@acme.example`, verification: 'VALID', lastVerifiedAt: new Date() }
+    });
+    const event = await db.outreachEvent.create({
+      data: {
+        tenantId: tenant.id, campaignId: campaign.id, contactId: person.id, leadId: lead.id,
+        stepOrder: 2, idempotencyKey: `html-${randomUUID()}`, scheduledAt: new Date()
+      }
+    });
+    const row = await queueRow(event.id);
+    assert.equal(row.reviewError, undefined);
+    assert.equal(row.previewContentType, 'HTML');
+    assert.equal(row.reviewContentType, 'HTML');
+    assert.equal(row.reviewSubject, 'HTML for Ada');
+    assert.match(row.reviewBody, /<p>Hi Ada at Acme &amp; Co<\/p>/);
+    assert.match(row.reviewBody, /<a href="https:\/\/calendly\.com\/sam\/30min\?utm_source=leadmelo&amp;utm_content=/);
+    assert.doesNotMatch(row.reviewBody, /\{\{|\}\}/, 'no placeholder reaches the queue');
+    assert.match(row.reviewBody, /<a href="https:\/\/leadmelo\.example\.com\/unsubscribe\?token=/, 'the HTML footer is part of the preview');
   });
 
   await t.test('the Approve send request the UI sends is accepted', async () => {
