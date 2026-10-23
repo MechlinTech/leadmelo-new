@@ -100,6 +100,25 @@ test('a generated env file cannot silently lose PROVIDER_GATEWAY_URL', () => {
   assert.match(deploy, /LEADMELO_NO_GATEWAY/, 'with an explicit opt-out for gateway-less deployments');
 });
 
+test('a missing gateway taxonomy file cannot leave the gateway unhealthy', () => {
+  const composeText = readFileSync('docker-compose.selfhosted.yml', 'utf8');
+  assert.match(composeText, /GATEWAY_TAXONOMY_FILE: \/etc\/leadmelo-gateway\/taxonomy\.json/);
+
+  const deploy = readFileSync('scripts/deploy.ps1', 'utf8');
+  assert.match(deploy, /function Ensure-GatewayTaxonomy/, 'the deploy repairs an absent host file');
+  assert.match(deploy, /gateway\/taxonomy\.empty\.json/, 'it uses the checked-in empty template');
+  assert.match(deploy, /ConvertFrom-Json/, 'an existing file is checked before the container starts');
+  assert.ok(deploy.indexOf('Ensure-GatewayTaxonomy') < deploy.indexOf("'--profile', 'gateway'"), 'repair happens before gateway startup');
+
+  const template = JSON.parse(readFileSync('gateway/taxonomy.empty.json', 'utf8'));
+  assert.deepEqual(template, { industries: {}, titles: {} }, 'the fallback contains no invented mappings');
+
+  const config = readFileSync('gateway/src/config.ts', 'utf8');
+  assert.match(config, /using built-in mappings only/, 'a missing file falls back visibly');
+  assert.match(config, /is not valid JSON/, 'a malformed file is still fatal');
+  assert.match(config, /is invalid/, 'wrong shapes are still fatal');
+});
+
 test('Dockerfile runs as a non-root user and prepares the gateway state directory', () => {
   const d = readFileSync('Dockerfile', 'utf8');
   assert.match(d, /USER node/); assert.match(d, /mkdir -p \/var\/lib\/leadmelo-gateway && chown node:node \/var\/lib\/leadmelo-gateway/);

@@ -19,10 +19,10 @@ Reliability: results are stored per `Idempotency-Key` (same key + same request r
 ## Setup
 
 1. **Set the gateway up in Settings.** Give each tenant a long random bearer token (`openssl rand -hex 32`) and save it as that tenant's bearer token in LeadMelo Settings, alongside its Apollo and Hunter keys. Saving pushes everything to the gateway over `PUT /credentials`, and there is no file to create or keep in sync. See "Tenants and the allow-list" below for what that trades away.
-2. Optionally create `taxonomy.json` from `gateway/taxonomy.example.json`. **Without an industry mapping nothing will qualify**, because Apollo's industry names ("computer software") will not equal your ICP's ("SaaS"). Add only mappings you consider genuinely equivalent.
+2. Optionally create `taxonomy.json` from `gateway/taxonomy.example.json`. The bundled compose file mounts `GATEWAY_CONFIG_DIR` at `/etc/leadmelo-gateway` and reads `/etc/leadmelo-gateway/taxonomy.json`; `scripts/deploy.ps1` creates a valid empty file when one is absent, so a fresh deployment cannot fail on ENOENT. A missing file also starts with built-in title equivalents and logs a warning. A file that is present but malformed is a configuration error and stops startup, so a typo cannot silently change who qualifies. **Without an industry mapping nothing will qualify when Apollo's wording differs**, because Apollo's industry names ("computer software") will not equal your ICP's ("SaaS"). Add only mappings you consider genuinely equivalent.
 3. Run behind a TLS reverse proxy (LeadMelo requires an https URL; see `deploy/caddy` and `deploy/nginx`):
    ```
-   GATEWAY_TAXONOMY_FILE=/etc/leadmelo/taxonomy.json \
+   GATEWAY_TAXONOMY_FILE=./gateway-config/taxonomy.json \
    GATEWAY_STORE_FILE=/var/lib/leadmelo-gateway/store.jsonl PORT=8788 npm run gateway
    ```
    Set `PROVIDER_GATEWAY_URL` for the LeadMelo web and worker to the proxy's https URL.
@@ -48,7 +48,7 @@ Bindings live in memory, so a restart re-teaches them from whatever Settings pus
 | Variable | Default | Meaning |
 |---|---|---|
 | `GATEWAY_TENANTS_FILE` | none (self-registering) | optional tenant bindings and vendor keys. Setting it to a non-empty file also turns self-registration **off**, restricting the gateway to those bearers |
-| `GATEWAY_TAXONOMY_FILE` | none | vendor-to-ICP wording maps |
+| `GATEWAY_TAXONOMY_FILE` | none | optional vendor-to-ICP wording maps. A missing file starts with built-in mappings and a warning; malformed JSON or an invalid shape is fatal |
 | `GATEWAY_STORE_FILE` | in memory | append-only file so a restart does not repurchase data (mode 0600, not encrypted) |
 | `GATEWAY_HOST` / `PORT` | 127.0.0.1 / 8788 | bind address |
 | `GATEWAY_SYNC_WAIT_MS` | 12000 | how long a request waits before answering `in_progress` (1000-14000) |
