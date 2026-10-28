@@ -2,8 +2,8 @@
 // Repository integrity guard.
 //
 // This check exists because the repository has previously shipped an obfuscated
-// loader in api.js, a second copy hidden in postcss.config.mjs, and a third copy
-// disguised as a font file. It deliberately fails closed on the exact indicators
+// loader in api.js, postcss.config.mjs, an extensionless init file invoked by
+// npm scripts, and a copy disguised as a font file. It deliberately fails closed on the exact indicators
 // observed in those incidents, plus a few structural rules that make a repeat
 // unlikely to go unnoticed.
 //
@@ -30,6 +30,7 @@ const files = trackedFiles().filter(file => existsSync(path.join(root, file)));
 // --- 1. Known-bad filenames -------------------------------------------------
 const forbiddenNames = new Set([
   'api.js',
+  'init',
   'temp_auto_push.bat',
   'temp_interactive_push.bat',
   'branch_structure.json',
@@ -140,7 +141,7 @@ for (const file of files) {
 // --- 5. Root scripts must not invoke a loader ------------------------------
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 for (const [name, command] of Object.entries(pkg.scripts ?? {})) {
-  if (/\bapi\.js\b|temp_auto_push|temp_interactive_push|branch_structure/i.test(String(command))) {
+  if (/\bapi\.js\b|\bnode\s+init\b|temp_auto_push|temp_interactive_push|branch_structure/i.test(String(command))) {
     fail(`package.json script "${name}" invokes a forbidden file: ${command}`);
   }
 }
