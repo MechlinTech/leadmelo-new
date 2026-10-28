@@ -9,7 +9,7 @@ import { z } from 'zod';
 // Only mappings between genuinely equivalent values belong here; they are how the operator lets a
 // vendor's wording match an ICP's exact wording without relabelling anyone.
 const tenantFile = z.array(z.object({ bearerSha256: z.string().regex(/^[0-9a-f]{64}$/), tenantId: z.string().min(1), apolloKey: z.string().min(8).optional(), hunterKey: z.string().min(8).optional() }).strict()).min(1);
-const taxonomyFile = z.object({ industries: z.record(z.string()).default({}), titles: z.record(z.string()).default({}) }).strict();
+const taxonomyFile = z.object({ industries: z.record(z.string(), z.string()).default({}), titles: z.record(z.string(), z.string()).default({}) }).strict();
 
 export type TenantBinding = { tenantId: string; apolloKey?: string; hunterKey?: string };
 export type GatewayConfig = {

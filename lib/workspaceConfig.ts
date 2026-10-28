@@ -50,7 +50,7 @@ export const workspaceConfigInput = z.object({
     inApp: z.boolean(),
     recipients: z.array(email).max(20),
     webhookUrl: httpsUrl.nullable(),
-    codes: z.record(z.boolean())
+    codes: z.record(z.string(), z.boolean())
   }).strict(),
   rules: z.array(ruleInput).max(40)
 }).strict();
