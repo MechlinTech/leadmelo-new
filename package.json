@@ -27,11 +27,12 @@
     "privacy:erasures": "node --import tsx scripts/privacy-erasures.ts",
     "docs:schema": "node scripts/generate-schema-docs.mjs",
     "bootstrap": "node --import tsx scripts/bootstrap.ts",
-    "audit:handoff": "python3 scripts/handoff_audit.py"
+    "audit:handoff": "python3 scripts/handoff_audit.py",
+    "security:scan": "node scripts/security-scan.mjs"
   },
   "dependencies": {
     "@prisma/client": "6.19.3",
-    "next": "15.5.25",
+    "next": "15.5.28",
     "react": "19.1.9",
     "react-dom": "19.1.9",
     "tsx": "4.20.6",

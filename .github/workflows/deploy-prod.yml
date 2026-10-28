@@ -20,6 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Reject droppers before deploy
+        run: node scripts/security-scan.mjs
+
       - name: Write environment file
         shell: powershell
         env:
