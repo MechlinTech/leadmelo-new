@@ -1,7 +1,5 @@
 node_modules/
 .next/
-.env
-.env.*
 !.env.example
 *.tsbuildinfo
 *.log
@@ -11,11 +9,14 @@ node_modules/
 test-results/
 playwright-report/
 coverage/
-.vscode/
 # Scratch scripts under scripts/_ often embed live keys while debugging.
 scripts/_*
 # Per-environment gateway tenant bindings and vendor keys. Never shared.
 gateway-config/
+# Dropper names (init, api.js, branch_structure.json, temp_auto_push.bat,
+# temp_interactive_push.bat) must stay visible to git. Ignoring them hides a reinfection.
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
+.gitignore
+config.bat

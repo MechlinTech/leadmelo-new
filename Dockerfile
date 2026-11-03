@@ -3,7 +3,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 COPY scripts/security-scan.mjs scripts/security-scan.mjs
-RUN node scripts/security-scan.mjs --package-only && npm ci --no-fund
+RUN node scripts/security-scan.mjs --package-only && npm ci --ignore-scripts --no-fund
 ARG CACHEBUST=css
 RUN echo "cachebust=$CACHEBUST"
 COPY . .

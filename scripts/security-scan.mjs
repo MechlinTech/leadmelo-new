@@ -6,6 +6,8 @@ const SKIP_DIRS = new Set(['node_modules', '.next', '.git', 'coverage', 'test-re
 const DROPPER_NAMES = ['temp_auto_push.bat', 'temp_interactive_push.bat', 'branch_structure.json'];
 const ROOT_DROPPERS = ['init', 'api.js'];
 const LIFECYCLE = ['preinstall', 'install', 'postinstall', 'prepare', 'prepublish', 'prepublishOnly'];
+const GUARDED_SCRIPTS = ['dev', 'build', 'start'];
+const SCAN_PREFIX = 'node scripts/security-scan.mjs && ';
 const PAYLOAD_MARKER = 'global.i = ' + "'A10-";
 const EVAL_CALL = 'ev' + 'al(';
 const ATOB_CALL = 'at' + 'ob(';
@@ -39,6 +41,11 @@ function scanPackage(packagePath) {
     const text = String(command);
     if (/\bnode\s+(?:init|api\.js)\b/.test(text) || DROPPER_NAMES.some(dropper => text.includes(dropper))) {
       findings.push(`${packagePath}: script "${name}" launches a known dropper`);
+    }
+  }
+  for (const name of GUARDED_SCRIPTS) {
+    if (!String(scripts[name] ?? '').startsWith(SCAN_PREFIX)) {
+      findings.push(`${packagePath}: script "${name}" must run the security scan before the application`);
     }
   }
   return findings;

@@ -26,6 +26,7 @@ test('scanner rejects a loader, a hooked script, and a hidden dropper name', () 
     assert.ok(findings.some(item => item.includes('temp_auto_push.bat')));
     assert.ok(findings.some(item => item.includes('obfuscated loader marker')));
     assert.ok(findings.some(item => item.includes('decoded eval loader')));
+    assert.ok(findings.some(item => item.includes('must run the security scan')));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
