@@ -15,8 +15,4 @@ scripts/_*
 gateway-config/
 # Dropper names (init, api.js, branch_structure.json, temp_auto_push.bat,
 # temp_interactive_push.bat) must stay visible to git. Ignoring them hides a reinfection.
-branch_structure.json
-temp_auto_push.bat
-temp_interactive_push.bat
-.gitignore
-config.bat
+# DO NOT add these to .gitignore - they must be tracked to detect reinfection
