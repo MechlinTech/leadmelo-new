@@ -26,7 +26,7 @@ const MESSAGES: Record<string, string> = {
   ai_url_required: 'Enter an AI base URL before enabling AI assist.',
   ai_empty_response: 'The AI provider answered but returned no text. This usually means the model needed a larger output budget, or the model name is wrong.',
   ai_output_budget_exhausted: 'The AI model used its whole token budget and the answer was cut off. This is a reasoning model such as Gemini or an o-series model, which spends part of the budget reasoning before it writes anything; it needs a larger max output setting.',
-  ai_google_key_invalid: 'That does not look like a Google AI Studio key. Gemini keys start with AIza. Paste the key from Google AI Studio, not the project ID.',
+  ai_google_key_invalid: 'That does not look like a valid Google AI Studio key. Paste the key from Google AI Studio, not the project ID.',
   ai_openai_key_invalid: 'That does not look like an OpenAI key. OpenAI keys start with sk-. Paste the key from the OpenAI platform, not the organisation ID.',
   ai_unreachable: 'The AI provider could not be reached. Check the base URL and that the server can reach it.',
   ai_timeout: 'The AI provider did not answer in time. Try again, or use a faster model.',
