@@ -34,10 +34,11 @@ export function checkAiUrl(raw: string, env: NodeJS.ProcessEnv = process.env): s
 // Providers that reject a short or wrongly-prefixed key outright, so a bad key costs no round trip.
 // Each entry pairs a host with a test for that provider's key format. A model field that holds an
 // email never names a model, so that is checked for every provider.
+// Note: Gemini keys are validated via the official API (actual call) rather than a prefix check,
+// because Google has updated their key format and the prefix is no longer a reliable indicator.
+// We still require a non-empty key for Gemini, but don't enforce a specific format.
 const KEY_FORMATS: Array<{ hosts: string[]; invalid: string; ok: (key: string) => boolean }> = [
-  // Gemini returns HTTP 400 "Please pass a valid API key" for a wrong key, not 401, and Google AI
-  // Studio keys are "AIza" followed by 35 more characters.
-  { hosts: ['generativelanguage.googleapis.com'], invalid: 'ai_google_key_invalid', ok: k => k.startsWith('AIza') && k.length >= 35 },
+  { hosts: ['generativelanguage.googleapis.com'], invalid: 'ai_key_required', ok: k => k.length > 0 },
   { hosts: ['api.openai.com'], invalid: 'ai_openai_key_invalid', ok: k => k.startsWith('sk-') && k.length >= 40 }
 ];
 

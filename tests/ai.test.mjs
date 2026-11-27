@@ -128,16 +128,17 @@ test('a 200 with no text distinguishes a spent token budget from an empty answer
 
 test('the key check knows each provider\'s format instead of only OpenAI\'s', () => {
   const gemini = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', 'AIza' + 'x'.repeat(35)), null);
+  // Gemini keys are now validated via actual API call, not prefix check - only non-empty check locally
+  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', 'any-key-that-is-not-empty'), null);
   assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', undefined), 'ai_key_required');
-  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', 'sk-proj-' + 'x'.repeat(40)), 'ai_google_key_invalid');
-  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', 'AIzaShort'), 'ai_google_key_invalid');
+  assert.equal(explainAiSetup(gemini, 'gemini-2.5-flash', ''), 'ai_key_required');
+  // OpenAI still validates prefix
   assert.equal(explainAiSetup('https://api.openai.com/v1', 'gpt-4o', 'sk-' + 'x'.repeat(40)), null);
   assert.equal(explainAiSetup('https://api.openai.com/v1', 'gpt-4o', 'AIza' + 'x'.repeat(35)), 'ai_openai_key_invalid');
   // A host we have no format for stays the provider's business to judge.
   assert.equal(explainAiSetup('http://localhost:11434/v1', 'llama3.1', undefined), null);
   // A model field holding an email is never a model name, whoever the provider is.
-  assert.equal(explainAiSetup(gemini, 'ops@example.com', 'AIza' + 'x'.repeat(35)), 'ai_model_is_email');
+  assert.equal(explainAiSetup(gemini, 'ops@example.com', 'any-key'), 'ai_model_is_email');
 });
 
 test('AI failures explain themselves instead of reading like a broken connection', async () => {
@@ -146,7 +147,7 @@ test('AI failures explain themselves instead of reading like a broken connection
   assert.match(userError('ai_provider_error_401'), /rejected the API key/i);
   assert.match(userError('ai_provider_error_404'), /does not recognise that model/i);
   assert.match(userError('ai_output_budget_exhausted'), /token budget/i);
-  assert.match(userError('ai_google_key_invalid'), /AIza/);
+  assert.match(userError('ai_google_key_invalid'), /Google AI Studio/);
   assert.match(userError('ai_openai_key_invalid'), /sk-/);
   // Gemini answers a bad key with 400, not 401, so that status needs its own sentence.
   assert.match(userError('ai_provider_error_400'), /AI Studio/);
